@@ -66,8 +66,12 @@ class STEMBuddy:
 
         # Initialize components
         self.led = LEDController(enabled=gpio_cfg.get("enabled", False))
+        stt_cfg = self.config.get("stt", {})
         # Continuous wake-word listener (always on the mic)
-        self.wake = WakeWordListener(wake_word=self.wake_word)
+        self.wake = WakeWordListener(
+            wake_word=self.wake_word,
+            model_size=stt_cfg.get("model_size", "small")
+        )
         self.tts = TextToSpeech()
         self.llm = LocalLLM(
             model_path=llm_cfg.get("model"),

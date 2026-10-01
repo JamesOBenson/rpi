@@ -8,14 +8,23 @@ cd models
 
 echo "=== Downloading AI Models ==="
 
-# 1. Vosk STT model (30MB) - if missing
+# 1. Vosk STT models - if missing
+#    large (1.3GB) = much more accurate (default); small (68MB) = fallback
+if [ ! -d "vosk-model-en-us-0.22" ]; then
+    echo "1/3: Vosk STT large model (1.3GB)..."
+    wget -q https://alphacephei.com/vosk/models/vosk-model-en-us-0.22.zip
+    unzip -q vosk-model-en-us-0.22.zip
+    rm vosk-model-en-us-0.22.zip
+else
+    echo "1/3: Vosk STT large model - already present"
+fi
 if [ ! -d "vosk-model-small-en-us-0.15" ]; then
-    echo "1/3: Vosk STT model (30MB)..."
+    echo "      Vosk STT small model (68MB fallback)..."
     wget -q https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip
     unzip -q vosk-model-small-en-us-0.15.zip
     rm vosk-model-small-en-us-0.15.zip
 else
-    echo "1/3: Vosk STT model - already present"
+    echo "      Vosk STT small model - already present"
 fi
 
 # 2. Piper TTS voice (61MB) - if missing
@@ -48,4 +57,5 @@ echo ""
 echo "=== Done! Models in $(pwd) ==="
 ls -lh *.gguf *.onnx* 2>/dev/null
 echo ""
-echo "To switch models, edit config/settings.yaml -> llm.model"
+echo "To switch LLM: edit config/settings.yaml -> llm.model"
+echo "To switch STT: edit config/settings.yaml -> stt.model_size (small|large)"

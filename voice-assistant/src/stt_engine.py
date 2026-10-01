@@ -19,6 +19,14 @@ from vosk import Model, KaldiRecognizer
 # Project root (parent of src/)
 PROJECT_ROOT = Path(__file__).parent.parent
 
+# Available Vosk models (config: stt.model_size)
+#   small = ~68MB, fastest   |   large = ~1.3GB, much more accurate
+# Both stream in real time on a Raspberry Pi 5.
+VOSK_MODELS = {
+    "small": "vosk-model-small-en-us-0.15",
+    "large": "vosk-model-en-us-0.22",
+}
+
 
 class SpeechToText:
     """Offline speech recognition with Vosk."""
@@ -187,12 +195,21 @@ class WakeWordListener:
     def __init__(
         self,
         model_path: str = None,
+        model_size: str = "small",
         wake_word: str = "buddy",
         sample_rate: int = 16000,
         question_timeout: float = 12.0
     ):
         if model_path is None:
-            model_path = str(PROJECT_ROOT / "models" / "vosk-model-small-en-us-0.15")
+            model_name = VOSK_MODELS.get(model_size, model_size)
+            model_path = PROJECT_ROOT / "models" / model_name
+            if not model_path.exists():
+                fallback = PROJECT_ROOT / "models" / VOSK_MODELS["small"]
+                if fallback.exists():
+                    print(f"⚠  Vosk model '{model_name}' not found - falling back to small model")
+                    model_path = fallback
+            model_path = str(model_path)
+        self.model_name = Path(model_path).name
         self.wake_word = wake_word.lower()
         self.sample_rate = sample_rate
         self.question_timeout = question_timeout
@@ -208,7 +225,7 @@ class WakeWordListener:
             os.dup2(_err, 2)
             os.close(_devnull)
             os.close(_err)
-        print("✓ Wake-word listener ready (always listening)")
+        print(f"✓ Wake-word listener ready (Vosk model: {self.model_name}, always listening)")
 
     def _rec(self):
         return KaldiRecognizer(self.model, self.sample_rate)

@@ -22,7 +22,8 @@ wake_word:
 
 stt:
   engine: "vosk"
-  model_size: "small"
+  # "small" = 68MB, fastest | "large" = 1.3GB, much more accurate
+  model_size: "large"
   language: "en-us"
   confidence_threshold: 0.5
 
