@@ -1,7 +1,7 @@
 # 🤖 STEM Buddy
 
 **An offline voice assistant for kids**  
-Built for Raspberry Pi 5 with Hailo-9L AI accelerator
+Built for Raspberry Pi 5 with Hailo-8L AI accelerator
 
 > Say "Hey Buddy" and ask anything about science, space, animals, or inventions!
 
@@ -9,7 +9,7 @@ Built for Raspberry Pi 5 with Hailo-9L AI accelerator
 
 ## 🎯 What is STEM Buddy?
 
-STEM Buddy is a **completely offline** voice assistant designed to spark curiosity in 4th and 5th graders (ages 9-11). It runs entirely on a Raspberry Pi 5 with 8GB RAM and Hailo-9L AI accelerator.
+STEM Buddy is a **completely offline** voice assistant designed to spark curiosity in 4th and 5th graders (ages 9-11). It runs entirely on a Raspberry Pi 5 with 8GB RAM and a Hailo-8L AI accelerator.
 
 ### Key Features
 
@@ -28,7 +28,7 @@ STEM Buddy is a **completely offline** voice assistant designed to spark curiosi
 | Component | Required | Notes |
 |-----------|----------|-------|
 | Raspberry Pi 5 (8GB) | ✅ | Main computer |
-| Hailo-9L AI Board | ✅ | Accelerates AI inference |
+| Hailo-8L AI HAT | ✅ | Accelerates Whisper speech-to-text |
 | USB Microphone | ✅ | Any decent USB mic works |
 | USB Speakers | ✅ | Or 3.5mm audio output |
 | Push Button | ⚠️ | For interrupt (can skip) |
@@ -81,15 +81,21 @@ it can't find them.
 
 ---
 
-### ⚡ Performance (measured on Raspberry Pi 5)
+### ⚡ Performance (measured on Raspberry Pi 5 + Hailo-8L)
 
 | Stage | Time |
 |-------|------|
 | Model load (startup) | ~9 sec |
-| Wake word + STT | ~2-5 sec |
-| RAG retrieval | <0.5 sec |
-| LLM answer (Qwen2-1.5B) | ~3-7 sec |
-| **Total: question → spoken answer** | **~8-12 sec** |
+| Wake word + STT (Hailo) | ~0.8 sec |
+| RAG retrieval | ~0.3 sec |
+| LLM answer (Qwen2-1.5B, first sentence) | ~5.5 sec |
+| **Total: end-of-speech → first audio** | **~6.8 sec** |
+
+The STT stage runs Whisper on the **Hailo-8L** (~0.8s) instead of CPU
+(~1.8s). If the Hailo is absent, fails to load, or returns a transcript
+without the wake word, it transparently falls back to CPU Whisper — the
+service still works, just ~1s slower. Set `stt.question_engine: "whisper"`
+in `config/settings.yaml` to skip Hailo entirely.
 
 Switch to the slower-but-deeper Phi-3 mini (~30s) via `config/settings.yaml`.
 
@@ -124,7 +130,7 @@ cd ~/voice-assistant
 
 ```
 Pi boots → systemd starts stem-buddy.service (after ~3s)
-         → loads Vosk STT, Piper TTS, Qwen2 LLM, knowledge base
+         → loads Vosk endpointer, Hailo/CPU Whisper STT, Piper TTS, Qwen2 LLM, knowledge base
          → ~20 seconds later: "Listening... (say 'Buddy' or just ask)"
 ```
 
@@ -168,7 +174,9 @@ voice-assistant/
 ├── src/
 │   ├── main.py              # Main orchestrator
 │   ├── wake_word.py         # Wake word detection
-│   ├── stt_engine.py        # Speech-to-text (Vosk)
+│   ├── stt_engine.py        # Wake word + endpointing (Vosk), question routing
+│   ├── hailo_whisper_engine.py # Question STT on Hailo-8L (Whisper HEFs)
+│   ├── whisper_engine.py    # CPU Whisper (wake-word judge + Hailo fallback)
 │   ├── tts_engine.py        # Text-to-speech (Piper)
 │   ├── llm_engine.py        # Local LLM (Phi-3)
 │   ├── knowledge_base.py    # RAG with ChromaDB
@@ -255,15 +263,15 @@ still fast and accurate!
 ```
 Mic → Wake Word → STT → RAG + LLM → TTS → Speakers
        │           │        │            │
-  "Hey Buddy"   Vosk   ChromaDB    Piper
-                    (1033 facts) (Phi-3)
+   "Buddy"    Hailo/Whisper ChromaDB    Piper
+   (always-on) (Whisper judges) (1058 facts) (Qwen2-1.5B)
 ```
 
-1. **Wake Word** - Detects "Hey Buddy"
-2. **STT** - Converts speech to text (Vosk, offline)
+1. **Wake Word** - Always-on. Small Vosk model endpoints "someone spoke"; Whisper (CPU) judges whether it said "Buddy"
+2. **STT** - Transcribes the question. **Hailo-8L Whisper** (~0.8s) when available, CPU Whisper fallback
 3. **RAG** - Retrieves relevant facts (ChromaDB vector search)
-4. **LLM** - Generates kid-friendly answer (Phi-3 mini, or fallback)
-5. **TTS** - Converts answer to speech (Piper)
+4. **LLM** - Generates kid-friendly answer (Qwen2-1.5B, streamed)
+5. **TTS** - Converts answer to speech (Piper, streamed sentence by sentence)
 
 ---
 
@@ -300,9 +308,9 @@ sudo usermod -a -G gpio $USER
 Download models manually from URLs in setup instructions.
 
 ### "Slow responses"
-- Use smaller Vosk model (`vosk-model-small-en-us-0.15`)
+- Use smaller Vosk model (`vosk-model-small-en-us-0.15`) - already the default
 - Reduce LLM context window in config
-- Enable Hailo acceleration (advanced)
+- Use `stt.question_engine: "hailo"` - Whisper on the Hailo-8L chip (default)
 
 ---
 
