@@ -22,11 +22,13 @@ wake_word:
 
 stt:
   engine: "vosk"
-  # Wake-word model: "large" catches 'buddy' more reliably in quiet/real
-  # speech (field-tested); "small" is lighter but drops quiet wake words.
-  # Vosk only handles wake word + end-of-speech here - Whisper does the
-  # actual question transcription.
-  model_size: "large"
+  # Wake-word model: "small" is correct for the hybrid architecture -
+  # Vosk's only job is endpointing ("someone spoke"), and Whisper is the
+  # actual wake-word judge. Measured on the Pi: the large model costs
+  # ~5GB of RAM for no accuracy benefit here (small emitted finals on
+  # 7/7 real user captures). Use "large" only if you switch back to
+  # Vosk-only wake detection.
+  model_size: "small"
   # Question engine:
   #   whisper = more accurate (measured: ~real-time decode, near-perfect
   #             even with background noise) | vosk = streaming, fastest
@@ -61,7 +63,10 @@ tts:
 
 rag:
   enabled: true
-  top_k: 3
+  # top_k=2 measured faster AND more accurate than 3: the 1.5B model
+  # chimeras answers when a third, weakly-related fact is in context
+  # (bench: 10.4s vs 13.8s to first audio, cleaner answers).
+  top_k: 2
   similarity_threshold: 0.7
 
 # GPIO Settings - Set enabled: false if Hailo HAT blocks the pins

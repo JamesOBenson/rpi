@@ -56,22 +56,11 @@ class LocalLLM:
         self.llama = None
         
         # Kid-friendly system prompt (no few-shot - they cause hallucinations)
-        self.system_prompt = """You are STEM Buddy, a friendly AI assistant for 4th and 5th graders (ages 9-11).
-
-Rules:
-- Use simple, exciting, friendly language
-- Keep answers SHORT: 1-2 sentences, under 40 words
-- Explain complex ideas with everyday examples
-- Sometimes end with "Want to know more?"
-- Say "I'm not sure about that one!" for unknown topics
-- Make science and tech fun
-- Start your answer directly. No labels, no "Response:", no "Chat History", no names.
-- Only answer the question asked. Do not invent conversations.
-
-Use the knowledge facts below as your source of truth when relevant.
-If the facts do NOT directly answer the question, ignore them and answer
-from your own knowledge instead of forcing an unrelated fact into the answer.
-"""
+        self.system_prompt = """You are STEM Buddy, a friendly AI for 4th-5th graders.
+Answer in 1-2 short sentences, simple words, under 40 words.
+Start directly - no labels, no names, no "Response:".
+Use the facts below when they answer the question; ignore them otherwise.
+If you don't know, say "I'm not sure about that one!"""
         
     def initialize(self):
         """Initialize LLM model."""
@@ -222,7 +211,7 @@ from your own knowledge instead of forcing an unrelated fact into the answer.
         # Combine context passages
         context_text = "\n".join([f"- {c['text']}" for c in context[:3]])
         
-        user_msg = f"Relevant facts:\n{context_text}\n\nQuestion: {question}\n\nGive a short, kid-friendly answer (1-2 sentences)."
+        user_msg = f"Facts:\n{context_text}\n\nQ: {question}"
         
         prompt = (
             f"<|im_start|>system\n{self.system_prompt}<|im_end|>\n"
