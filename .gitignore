@@ -1,0 +1,45 @@
+# ── OS / editor ─────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# ── Python ──────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+venv/
+.venv/
+env/
+.python-version
+
+# ── ML / voice models (large binaries - fetch via setup scripts) ────
+models/
+*.gguf
+*.onnx
+*.onnx.data
+*.tflite
+*.bin
+*.pt
+*.pth
+*.h5
+*.safetensors
+
+# ── Vector DBs / generated data (regenerated at setup) ──────────────
+chroma/
+*.chroma/
+*.sqlite
+*.sqlite3
+*.db
+
+# ── Logs / runtime artifacts ────────────────────────────────────────
+logs/
+*.log
+*.wav
+/tmp/
+
+# ── Secrets / local-only config ─────────────────────────────────────
+.env
+*.local.yaml
+*.local.yml

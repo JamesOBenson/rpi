@@ -1,0 +1,30 @@
+# STEM Buddy - Voice Assistant Dependencies
+# All open-source, offline-capable
+# Tested on Raspberry Pi 5 (8GB) + Python 3.13
+
+# Core
+numpy>=1.24.0
+pyyaml>=6.0
+rich>=13.0.0
+
+# Audio I/O (needs system lib: sudo apt install portaudio19-dev)
+sounddevice>=0.4.6
+soundfile>=0.12.1
+
+# Speech-to-Text (Offline)
+vosk>=0.3.45
+
+# Text-to-Speech (Offline)
+piper-tts>=1.2.0
+
+# LLM (Offline) - prebuilt aarch64 wheels available
+llama-cpp-python>=0.3.0
+
+# RAG / Vector Database
+chromadb>=0.4.22
+
+# Hardware Interface (OPTIONAL - only if GPIO pins are accessible)
+# RPi.GPIO>=0.7.1
+
+# Utilities
+requests>=2.31.0

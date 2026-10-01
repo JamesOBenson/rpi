@@ -1,0 +1,62 @@
+# STEM Buddy Configuration
+# Kid-friendly voice assistant settings
+
+app:
+  name: "STEM Buddy"
+  wake_word: "buddy"
+  interrupt_word: "stop"
+  voice_speed: 1.0
+  volume: 0.8
+
+audio:
+  sample_rate: 16000
+  channels: 1
+  buffer_size: 512
+  listen_timeout: 10
+  silence_threshold: 0.01
+  silence_duration: 1.5
+
+wake_word:
+  sensitivity: 0.6
+  framework: "fallback"  # "porcupine" or "fallback"
+
+stt:
+  engine: "vosk"
+  model_size: "small"
+  language: "en-us"
+  confidence_threshold: 0.5
+
+llm:
+  # Place .gguf files in models/
+  # qwen2-1.5b  = FAST (~5-10 sec answers), great for kids  * RECOMMENDED
+  # phi-3-mini  = slower (~30 sec answers), slightly deeper
+  model: "qwen2-1.5b-instruct.Q4_K_M.gguf"
+  context_window: 512
+  max_tokens: 100
+  temperature: 0.3
+  threads: 8
+
+tts:
+  engine: "piper"
+  voice: "en_US-lessac-medium"
+  output_format: "wav"
+  pitch: 1.0
+
+rag:
+  enabled: true
+  top_k: 3
+  similarity_threshold: 0.7
+
+# GPIO Settings - Set enabled: false if Hailo HAT blocks the pins
+gpio:
+  enabled: false  # Set to true only if GPIO pins are accessible
+  button_pin: 4   # GPIO pin for interrupt button
+  led_red_pin: 17
+  led_green_pin: 27
+  led_blue_pin: 22
+
+logging:
+  level: "INFO"
+  file: "logs/buddy.log"
+  max_size: 1000000
+  backup_count: 3
