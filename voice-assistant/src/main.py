@@ -71,26 +71,37 @@ class STEMBuddy:
         self.led = LEDController(enabled=gpio_cfg.get("enabled", False))
         stt_cfg = self.config.get("stt", {})
         self.stt_cfg = stt_cfg
-        self.question_engine = stt_cfg.get("question_engine", "vosk").lower()
+        self.question_engine = stt_cfg.get("question_engine", "whisper").lower()
         # Continuous wake-word listener (always on the mic).
         # hybrid=True makes it also hand back the raw question audio so a
         # stronger engine can re-transcribe it.
         self.wake = WakeWordListener(
             wake_word=self.wake_word,
             model_size=stt_cfg.get("model_size", "small"),
-            hybrid=(self.question_engine == "whisper"),
+            hybrid=(self.question_engine in ("whisper", "hailo")),
             debug_audio=stt_cfg.get("debug_audio", False)
         )
         self.whisper = None
-        if self.question_engine == "whisper":
+        self.hailo = None
+        if self.question_engine in ("whisper", "hailo"):
+            # CPU Whisper is ALWAYS loaded in hybrid modes: it is the
+            # wake-word judge (Vosk can't reliably hear 'buddy'), and the
+            # automatic fallback when Hailo is absent or fails.
             self.whisper = WhisperSTT(
-                model_size=stt_cfg.get("whisper_model", "small.en"),
+                model_size=stt_cfg.get("whisper_model", "base.en"),
                 cpu_threads=stt_cfg.get("whisper_threads", 4)
             )
-            # Whisper is the wake-word judge: Vosk can't reliably hear 'buddy'
-            # for every speaker, but Whisper can. It gets the captured audio
-            # and decides whether the device was addressed.
             self.wake.whisper = self.whisper
+            if self.question_engine == "hailo":
+                try:
+                    from hailo_whisper_engine import HailoWhisperSTT
+                    self.hailo = HailoWhisperSTT(
+                        model_dir=stt_cfg.get("hailo_model_dir") or None
+                    )
+                    self.wake.hailo = self.hailo
+                except Exception as e:
+                    print(f"⚠ Hailo STT unavailable ({e}) - "
+                          f"using CPU Whisper instead")
         self.tts = TextToSpeech()
         self.llm = LocalLLM(
             model_path=llm_cfg.get("model"),
@@ -151,9 +162,14 @@ class STEMBuddy:
                 if not question and self.whisper is not None and q_audio is not None:
                     # Separate-utterance case: wake word was its own sentence,
                     # so the question audio wasn't transcribed yet.
-                    w = self.whisper.transcribe(q_audio)
-                    if w:
-                        question = self._strip_wake(w)
+                    if self.hailo is not None:
+                        h = self._safe_hailo(q_audio)
+                        if h and len(h.split()) >= 2:
+                            question = self._strip_wake(h)
+                    if not question:
+                        w = self.whisper.transcribe(q_audio)
+                        if w:
+                            question = self._strip_wake(w)
                 if not question:
                     continue
 
@@ -172,6 +188,16 @@ class STEMBuddy:
                 await asyncio.sleep(3)
 
         self._close_stream()
+        # Release the Hailo device BEFORE Python teardown: letting HailoRT
+        # destruct alongside ctranslate2/vosk crashes (SIGBUS/SIGSEGV) and
+        # would make systemd see an abnormal exit + restart flap.
+        if self.hailo is not None:
+            try:
+                self.hailo.close()
+            except Exception:
+                pass
+            self.hailo = None
+            self.wake.hailo = None
 
     def _close_stream(self):
         if self.stream is not None:
@@ -196,6 +222,18 @@ class STEMBuddy:
                 console.print("[green]✓ Audio devices found[/green]")
         except Exception as e:
             console.print(f"[yellow]Could not check audio: {e}[/yellow]")
+
+    def _safe_hailo(self, audio: np.ndarray) -> str:
+        """Hailo transcription with automatic CPU fallback on any error."""
+        if self.hailo is None:
+            return ""
+        try:
+            return self.hailo.transcribe(audio)
+        except Exception as e:
+            print(f"  (hailo error: {e} - falling back to CPU Whisper)")
+            self.hailo = None
+            self.wake.hailo = None
+            return ""
 
     def _save_debug_audio(self, audio: np.ndarray):
         """Save the captured question WAV for debugging (stt.debug_audio: true)."""
@@ -358,6 +396,15 @@ class STEMBuddy:
         """Stop the voice assistant."""
         self.running = False
         self._close_stream()
+        # Release the Hailo device explicitly: tearing down HailoRT together
+        # with ctranslate2/vosk at Python exit segfaults non-deterministically.
+        if self.hailo is not None:
+            try:
+                self.hailo.close()
+            except Exception:
+                pass
+            self.hailo = None
+            self.wake.hailo = None
         self.led.cleanup()
         self.interrupt.cleanup()
         console.print(Panel("STEM Buddy is offline. Goodbye!", style="blue"))

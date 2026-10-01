@@ -26,6 +26,7 @@ def main():
     ap.add_argument("--prompt", choices=["full", "short"], default="full")
     ap.add_argument("--topk", type=int, default=3)
     ap.add_argument("--audio", default=None)
+    ap.add_argument("--stt", choices=["whisper", "hailo"], default="whisper")
     args = ap.parse_args()
 
     # Pick the best real capture by default
@@ -52,6 +53,13 @@ def main():
 
     wake = WakeWordListener(wake_word="buddy", model_size="small", hybrid=True)
     whisper = WhisperSTT(model_size="base.en", cpu_threads=4)
+    hailo = None
+    if args.stt == "hailo":
+        from hailo_whisper_engine import HailoWhisperSTT
+        try:
+            hailo = HailoWhisperSTT()
+        except Exception as e:
+            print(f"  Hailo unavailable ({e}) - using CPU whisper")
     llm = LocalLLM(n_threads=args.threads)
     if args.prompt == "short":
         llm.system_prompt = SHORT_PROMPT
@@ -65,11 +73,15 @@ def main():
         a16 = q_audio
         window = np.concatenate([a16, np.zeros(16000, dtype=np.int16)])
         audio = wake._normalize_for_asr(wake._trim_silence(window))
-        text = whisper.transcribe(audio)
+        text = ""
+        if hailo is not None:
+            text = hailo.transcribe(audio)
+        if not wake._has_wake(text):
+            text = whisper.transcribe(audio)
         q = wake._after_wake(text) if wake._has_wake(text) else wake._clean(text)
         question = q or question or "why is the sky blue"
     t_stt = time.time() - t0
-    print(f"  STT : {t_stt:5.2f}s  -> {question!r}")
+    print(f"  STT : {t_stt:5.2f}s  -> {question!r}  (engine: {args.stt})")
 
     # --- Stage 2: RAG ---
     t0 = time.time()
@@ -101,5 +113,7 @@ def main():
     else:
         print("  LLM produced no sentences!")
     print(f"  (config: threads={args.threads}, prompt={args.prompt}, topk={args.topk})")
+    if hailo is not None:
+        hailo.close()  # explicit release: HailoRT+ctranslate2 teardown crashes otherwise
 
 main()

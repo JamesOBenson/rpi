@@ -30,9 +30,21 @@ stt:
   # Vosk-only wake detection.
   model_size: "small"
   # Question engine:
-  #   whisper = more accurate (measured: ~real-time decode, near-perfect
-  #             even with background noise) | vosk = streaming, fastest
-  question_engine: "whisper"
+  #   hailo   = Hailo-8L Whisper base (5s windows). ~0.6s vs ~1.8s for CPU.
+  #             CPU Whisper stays loaded as wake-word judge + automatic
+  #             fallback (if Hailo is absent, fails to load, or returns a
+  #             transcript without the wake word, CPU Whisper re-runs).
+  #             Accuracy on 13 real captures: 12/13 usable, 1 needed the
+  #             CPU fallback (caught by the wake-word check).
+  #   whisper = CPU-only (faster-whisper), most robust, ~1.8s per question
+  question_engine: "hailo"
+  # Hailo model assets (HEFs + weights, from the Hailo model zoo, H8L):
+  #   models/hailo-whisper/base-whisper-encoder-5s_h8l.hef
+  #   models/hailo-whisper/base-whisper-decoder-fixed-sequence-matmul-split_h8l.hef
+  #   models/hailo-whisper/token_embedding_weight_base.npy
+  #   models/hailo-whisper/onnx_add_input_base.npy
+  #   data/hailo_whisper/mel_filters.npz
+  # hailo_model_dir: "models/hailo-whisper"  # default
   # whisper_model (measured on Pi 5, int8, 4 threads):
   #   base.en  = ~0.5x real-time decode, near-perfect  * RECOMMENDED
   #   small.en = ~1.5x real-time decode, perfect (costs +3s per question)

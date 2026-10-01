@@ -16,6 +16,9 @@ soundfile>=0.12.1
 #   faster-whisper - question transcription in hybrid mode (CPU, int8)
 vosk>=0.3.45
 faster-whisper>=1.0.0
+# Hailo-8L question engine: tokenizer for the model-zoo Whisper HEFs.
+# (Only used when stt.question_engine = "hailo"; CPU path ignores it.)
+transformers>=4.40.0
 
 # Text-to-Speech (Offline)
 piper-tts>=1.2.0

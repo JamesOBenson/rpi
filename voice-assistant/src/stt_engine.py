@@ -214,16 +214,17 @@ class WakeWordListener:
             model_path = str(model_path)
         self.model_name = Path(model_path).name
         self.wake_word = wake_word.lower()
-        # Words Whisper might produce for the wake word (it hears 'buddy' as
-        # 'button' for some speakers). Vosk can't be trusted for this -
-        # Whisper is the wake-word judge in hybrid mode.
+        # Words Whisper/Hailo might produce for the wake word (they hear
+        # 'buddy' as 'button' or 'body' for some speakers). Vosk can't be
+        # trusted for this - a strong engine is the wake-word judge.
         self.wake_variants = tuple(dict.fromkeys([
             self.wake_word,
             self.wake_word.rstrip("y") + "ies" if self.wake_word.endswith("y")
             else self.wake_word + "s",
-            "button",
+            "button", "body",
         ]))
-        self.whisper = None  # set by main.py when question_engine=whisper
+        self.whisper = None  # set by main.py (wake-word judge + fallback)
+        self.hailo = None    # set by main.py when question_engine=hailo
         # Directed questions are short; longer voiced windows are treated as
         # background conversation and skipped (avoids 17-25s Whisper decodes
         # that would block the wake loop).
@@ -360,7 +361,19 @@ class WakeWordListener:
                     if len(audio) / self.sample_rate > self.max_question_sec:
                         print("  (long background speech - skipped)")
                         continue
-                    text = self.whisper.transcribe(audio)
+                    # Hailo first (~0.6s): if it hears the wake word we're
+                    # done. If not (misheard, or no Hailo), Whisper is the
+                    # final judge - it still gets the last word, exactly as
+                    # before.
+                    text = ""
+                    if self.hailo is not None:
+                        try:
+                            text = self.hailo.transcribe(audio)
+                        except Exception as e:
+                            print(f"  (hailo error: {e})")
+                            text = ""
+                    if not self._has_wake(text):
+                        text = self.whisper.transcribe(audio)
                     if self._has_wake(text):
                         q = self._after_wake(text)
                         if self._meaningful(q):
