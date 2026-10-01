@@ -24,6 +24,7 @@ import threading
 import time
 
 import yaml
+import numpy as np
 import sounddevice as sd
 from pathlib import Path
 from rich.console import Console
@@ -69,6 +70,7 @@ class STEMBuddy:
         # Initialize components
         self.led = LEDController(enabled=gpio_cfg.get("enabled", False))
         stt_cfg = self.config.get("stt", {})
+        self.stt_cfg = stt_cfg
         self.question_engine = stt_cfg.get("question_engine", "vosk").lower()
         # Continuous wake-word listener (always on the mic).
         # hybrid=True makes it also hand back the raw question audio so a
@@ -76,7 +78,8 @@ class STEMBuddy:
         self.wake = WakeWordListener(
             wake_word=self.wake_word,
             model_size=stt_cfg.get("model_size", "small"),
-            hybrid=(self.question_engine == "whisper")
+            hybrid=(self.question_engine == "whisper"),
+            debug_audio=stt_cfg.get("debug_audio", False)
         )
         self.whisper = None
         if self.question_engine == "whisper":
@@ -84,6 +87,10 @@ class STEMBuddy:
                 model_size=stt_cfg.get("whisper_model", "small.en"),
                 cpu_threads=stt_cfg.get("whisper_threads", 4)
             )
+            # Whisper is the wake-word judge: Vosk can't reliably hear 'buddy'
+            # for every speaker, but Whisper can. It gets the captured audio
+            # and decides whether the device was addressed.
+            self.wake.whisper = self.whisper
         self.tts = TextToSpeech()
         self.llm = LocalLLM(
             model_path=llm_cfg.get("model"),
@@ -135,8 +142,15 @@ class STEMBuddy:
 
                 # Blocks until "buddy" + question are captured
                 question, q_audio = self.wake.wait_for_question(self.stream)
-                if self.whisper is not None and q_audio is not None:
-                    # Hybrid: let the stronger engine transcribe the question
+                if q_audio is not None:
+                    # Quiet speech (peak ~0.2) measurably degrades every STT
+                    # engine; raise it to a comfortable level first.
+                    q_audio = self._normalize(q_audio)
+                    if self.stt_cfg.get("debug_audio"):
+                        self._save_debug_audio(q_audio)
+                if not question and self.whisper is not None and q_audio is not None:
+                    # Separate-utterance case: wake word was its own sentence,
+                    # so the question audio wasn't transcribed yet.
                     w = self.whisper.transcribe(q_audio)
                     if w:
                         question = self._strip_wake(w)
@@ -183,6 +197,37 @@ class STEMBuddy:
         except Exception as e:
             console.print(f"[yellow]Could not check audio: {e}[/yellow]")
 
+    def _save_debug_audio(self, audio: np.ndarray):
+        """Save the captured question WAV for debugging (stt.debug_audio: true)."""
+        try:
+            import wave
+            path = Path(__file__).parent.parent / "logs" / "audio" / \
+                f"q-{time.strftime('%Y%m%d-%H%M%S')}.wav"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            pcm = (np.clip(audio, -1.0, 1.0) * 32767).astype(np.int16)
+            with wave.open(str(path), "wb") as w:
+                w.setnchannels(1)
+                w.setsampwidth(2)
+                w.setframerate(16000)
+                w.writeframes(pcm.tobytes())
+            print(f"  \U0001f399 debug audio saved: {path.name} "
+                  f"({len(audio)/16000:.1f}s, peak={float(np.abs(audio).max()):.3f})")
+        except Exception as e:
+            print(f"  (debug audio save failed: {e})")
+
+    def _normalize(self, audio: np.ndarray, target_peak: float = 0.9,
+                   max_gain: float = 6.0) -> np.ndarray:
+        """Raise quiet question audio to a comfortable level for Whisper.
+
+        Bounded gain (max 6x) helps quiet speech without turning room
+        noise into a wall of sound. Audio already at/above target is
+        passed through untouched.
+        """
+        peak = float(np.abs(audio).max())
+        if peak < 1e-4 or peak >= target_peak:
+            return audio
+        return audio * min(target_peak / peak, max_gain)
+
     def _strip_wake(self, text: str) -> str:
         """Remove a leading wake word / filler from a transcript.
 
@@ -192,7 +237,7 @@ class STEMBuddy:
         t = text.strip()
         while True:
             m = re.match(
-                r"^(?:buddy|buddies|hey|hi|hello|can you|could you|please)[,.!?;\s]*",
+                r"^(?:buddy|buddies|button|body|hey|hi|hello|can you|could you|please)[,.!?;\s]*",
                 t, re.IGNORECASE
             )
             if not m or m.end() == 0:

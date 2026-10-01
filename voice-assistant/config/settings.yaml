@@ -22,9 +22,11 @@ wake_word:
 
 stt:
   engine: "vosk"
-  # Wake-word model: "small" is plenty in hybrid mode (Whisper does the
-  # heavy lifting on the question). Use "large" with question_engine: vosk.
-  model_size: "small"
+  # Wake-word model: "large" catches 'buddy' more reliably in quiet/real
+  # speech (field-tested); "small" is lighter but drops quiet wake words.
+  # Vosk only handles wake word + end-of-speech here - Whisper does the
+  # actual question transcription.
+  model_size: "large"
   # Question engine:
   #   whisper = more accurate (measured: ~real-time decode, near-perfect
   #             even with background noise) | vosk = streaming, fastest
@@ -36,6 +38,8 @@ stt:
   # whisper_threads: 4 = the fast A76 cores only. 8 threads hits the slow
   # A55s and is ~2x slower (measured). Leave 4 on the Pi 5.
   whisper_threads: 4
+  # Save every captured question to logs/audio/*.wav (for debugging)
+  debug_audio: true
   language: "en-us"
   confidence_threshold: 0.5
 

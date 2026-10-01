@@ -34,6 +34,21 @@ STEM_FACTS = [
     {"id": "stem_008", "text": "The telephone was invented by Alexander Graham Bell in 1876. His first words over the phone were: 'Mr. Watson, come here, I want to see you!'", "metadata": {"topic": "inventions", "grade_level": "4-5", "source": "stem"}},
     {"id": "stem_009", "text": "Photosynthesis is how plants make their own food. They use sunlight, carbon dioxide from the air, and water to create sugar and release oxygen as a byproduct.", "metadata": {"topic": "nature", "grade_level": "4-5", "source": "stem"}},
     {"id": "stem_010", "text": "The water cycle moves water around Earth. Water evaporates from oceans, forms clouds, falls as rain or snow, and flows back to the oceans, repeating endlessly.", "metadata": {"topic": "nature", "grade_level": "4-5", "source": "stem"}},
+    {"id": "stem_011", "text": "The sky is blue because of the way sunlight scatters in the air. Sunlight looks white, but it is made of all the colors of the rainbow. When it hits the tiny gas particles in the atmosphere, blue light scatters in every direction much more than red light does, so we see blue all around us when we look up. At sunset, the light travels through much more air, and the blue scatters away before it reaches us, so the sky turns red and orange.", "metadata": {"topic": "physics", "grade_level": "4-5", "source": "stem"}},
+    {"id": "stem_012", "text": "We have day and night because the Earth spins around. The Earth rotates once every 24 hours, so while it is light on your side, the other side of the planet is in darkness. The Sun does not go to sleep or sink into the ocean - the Earth is simply turning your town away from it.", "metadata": {"topic": "space", "grade_level": "4-5", "source": "stem"}},
+    {"id": "stem_013", "text": "The seasons happen because the Earth is tilted as it orbits the Sun. When your side of Earth leans toward the Sun, you get more direct sunlight and longer days, which is summer. Six months later, Earth's orbit has brought your side to lean away, the sunlight spreads out thinner, and it is winter. Seasons are NOT caused by Earth getting closer to or farther from the Sun.", "metadata": {"topic": "space", "grade_level": "4-5", "source": "stem"}},
+    {"id": "stem_014", "text": "The Moon changes shape over about 29.5 days because of where it is in its orbit around Earth. The Sun always lights half of the Moon, but from Earth we see different amounts of the lit half. When we see all of the lit half it is a full moon, and when the lit side faces away from us we see nothing at all, a new moon. The Moon does not make its own light - it reflects the Sun's.", "metadata": {"topic": "space", "grade_level": "4-5", "source": "stem"}},
+    {"id": "stem_015", "text": "A volcano erupts because of heat from deep inside the Earth. Some rock down there melts into magma, and because magma is lighter than solid rock, it pushes upward. When it finds a crack in the crust, it erupts, and the molten rock is then called lava. Bubbles of gas trapped in the magma are what make some eruptions explosive.", "metadata": {"topic": "earth", "grade_level": "4-5", "source": "stem"}},
+    {"id": "stem_016", "text": "The ocean is salty because rain has slowly weathered rocks on land for hundreds of millions of years, carrying dissolved minerals into the sea. Rivers still deliver salt to the ocean every day, and when ocean water evaporates to form clouds, the salt stays behind. So the ocean has kept getting saltier, little by little, for billions of years.", "metadata": {"topic": "nature", "grade_level": "4-5", "source": "stem"}},
+    {"id": "stem_017", "text": "Lightning and thunder are the same event. Inside a storm cloud, ice and water bump together and build up static electricity. When the charge jumps to the ground as lightning, the air around it heats up so fast it explodes outward as a shock wave - that is thunder. You see the flash before you hear the boom because light travels much faster than sound.", "metadata": {"topic": "physics", "grade_level": "4-5", "source": "stem"}},
+    {"id": "stem_018", "text": "A black hole is a place where a very massive star has collapsed, squeezing all of its mass into an incredibly tiny point. Its gravity is so strong that nothing can escape, not even light, which is why it appears black. Astronomers cannot see a black hole directly, but they can see the hot, glowing gas swirling around it.", "metadata": {"topic": "space", "grade_level": "4-5", "source": "stem"}},
+    {"id": "stem_019", "text": "Gravity is the invisible force that pulls things toward each other. The bigger an object is, the stronger its gravity. Earth is huge, so its gravity pulls everything toward its center, which is why you stay on the ground and rain falls down. Isaac Newton figured this out around 1666, famously inspired by a falling apple.", "metadata": {"topic": "physics", "grade_level": "4-5", "source": "stem"}},
+    {"id": "stem_020", "text": "Ice floats because water is one of the few things that is LIGHTER when it freezes. When water freezes, its molecules lock into a roomy crystal structure full of tiny gaps, so ice is less dense than liquid water. That is lucky for nature: ice forms on top of lakes, insulates the water below, and fish can survive the winter.", "metadata": {"topic": "physics", "grade_level": "4-5", "source": "stem"}},
+    {"id": "stem_021", "text": "Airplanes fly because of lift. As the plane moves forward, air flows faster over the curved top of the wing than under it, creating lower pressure above the wing. The higher pressure below then pushes the wing up. When lift is greater than the plane's weight, it climbs. The engines pull the plane forward and the wings do the lifting.", "metadata": {"topic": "engineering", "grade_level": "4-5", "source": "stem"}},
+    {"id": "stem_022", "text": "DNA is the instruction manual inside almost every cell of your body. It is a molecule shaped like a twisted ladder, and the order of its four chemical letters - A, T, C, and G - spells out the instructions for building and running you. You inherit half your DNA from your mother and half from your father, which is why you look like a mix of both.", "metadata": {"topic": "biology", "grade_level": "4-5", "source": "stem"}},
+    {"id": "stem_023", "text": "Stars twinkle because of Earth's atmosphere. Starlight has to travel through many layers of moving air on its way to your eyes, and the air bends the light slightly as it goes. The bending changes from moment to moment, so the star's light flickers and shimmers. In space, with no air at all, stars do not twinkle - that is why they look steady in photos taken from orbit.", "metadata": {"topic": "space", "grade_level": "4-5", "source": "stem"}},
+    {"id": "stem_024", "text": "An earthquake happens because Earth's crust is made of giant slabs of rock called tectonic plates, and they slowly creep along, a few centimeters a year. When two plates get stuck and then suddenly slip, the ground shakes. The shaking travels through the ground as waves, and scientists called seismologists measure them with instruments called seismographs.", "metadata": {"topic": "earth", "grade_level": "4-5", "source": "stem"}},
+    {"id": "stem_025", "text": "Leaves are green in summer because of a molecule called chlorophyll, which plants use to turn sunlight into food. In autumn the days get shorter and the plant stops making chlorophyll, so other pigments that were hidden all along, like yellows and oranges, show through. Some trees, like maples, make brand-new red pigments in the fall.", "metadata": {"topic": "nature", "grade_level": "4-5", "source": "stem"}},
 ]
 
 
@@ -77,13 +92,24 @@ class KnowledgeBase:
                 metadata={"hnsw:space": "cosine"}
             )
             
-            print(f"✓ Knowledge base initialized")
-            print(f"  Documents: {self.collection.count()}")
-            
-            # Load knowledge if empty
-            if self.collection.count() == 0:
+            # Build (or rebuild) the index when the fact set has changed -
+            # e.g. after editing STEM_FACTS or the cybersecurity JSON.
+            expected = len(STEM_FACTS) + len(self._load_cybersec_facts())
+            current = self.collection.count()
+            if current == 0:
                 print("  Building knowledge index (first run, ~30 sec)...")
                 self._load_all_knowledge()
+            elif current != expected:
+                print(f"  Fact set changed ({current} -> {expected} docs) - rebuilding index...")
+                self.client.delete_collection(self.collection_name)
+                self.collection = self.client.get_or_create_collection(
+                    name=self.collection_name,
+                    metadata={"hnsw:space": "cosine"}
+                )
+                self._load_all_knowledge()
+            
+            print(f"✓ Knowledge base initialized")
+            print(f"  Documents: {self.collection.count()}")
                 
         except Exception as e:
             print(f"⚠ Knowledge base error: {e}")

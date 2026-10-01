@@ -26,8 +26,9 @@ def beep(freq=880, dur=0.7):
 
 
 print("Setting up components...", flush=True)
-wake = WakeWordListener(wake_word="buddy", model_size="small", hybrid=True)
-whisper = WhisperSTT(model_size="small.en")
+wake = WakeWordListener(wake_word="buddy", model_size="large", hybrid=True)
+whisper = WhisperSTT(model_size="base.en", cpu_threads=4)
+wake.whisper = whisper  # Whisper is the wake-word judge
 llm = LocalLLM()
 kb = KnowledgeBase()
 tts = TextToSpeech()
@@ -43,7 +44,7 @@ beep()
 beep()
 
 q, q_audio = wake.wait_for_question(stream)
-if q_audio is not None:
+if not q and q_audio is not None:
     w = whisper.transcribe(q_audio)
     if w:
         q = w

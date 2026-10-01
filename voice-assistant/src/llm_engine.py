@@ -69,6 +69,8 @@ Rules:
 - Only answer the question asked. Do not invent conversations.
 
 Use the knowledge facts below as your source of truth when relevant.
+If the facts do NOT directly answer the question, ignore them and answer
+from your own knowledge instead of forcing an unrelated fact into the answer.
 """
         
     def initialize(self):

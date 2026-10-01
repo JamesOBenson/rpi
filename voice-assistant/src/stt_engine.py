@@ -200,7 +200,8 @@ class WakeWordListener:
         wake_word: str = "buddy",
         sample_rate: int = 16000,
         question_timeout: float = 12.0,
-        hybrid: bool = False
+        hybrid: bool = False,
+        debug_audio: bool = False
     ):
         if model_path is None:
             model_name = VOSK_MODELS.get(model_size, model_size)
@@ -213,12 +214,27 @@ class WakeWordListener:
             model_path = str(model_path)
         self.model_name = Path(model_path).name
         self.wake_word = wake_word.lower()
+        # Words Whisper might produce for the wake word (it hears 'buddy' as
+        # 'button' for some speakers). Vosk can't be trusted for this -
+        # Whisper is the wake-word judge in hybrid mode.
+        self.wake_variants = tuple(dict.fromkeys([
+            self.wake_word,
+            self.wake_word.rstrip("y") + "ies" if self.wake_word.endswith("y")
+            else self.wake_word + "s",
+            "button",
+        ]))
+        self.whisper = None  # set by main.py when question_engine=whisper
+        # Directed questions are short; longer voiced windows are treated as
+        # background conversation and skipped (avoids 17-25s Whisper decodes
+        # that would block the wake loop).
+        self.max_question_sec = 4.5
         self.sample_rate = sample_rate
         self.question_timeout = question_timeout
         # Hybrid mode: keep raw audio around so a stronger engine (Whisper)
         # can transcribe the question after Vosk hears the wake word.
         self.hybrid = hybrid
-        self._ring = deque(maxlen=(sample_rate // 10) * 12)  # last 12s, 0.1s chunks
+        self.debug_audio = debug_audio
+        self._ring = deque(maxlen=120)  # last 12s of 0.1s chunks
         self._cap = []  # audio captured since the wake word
 
         print("Loading wake-word model (Vosk)...")
@@ -246,13 +262,21 @@ class WakeWordListener:
         return len(words) >= 2
 
     def _after_wake(self, text: str) -> str:
-        """Return the words that come after the wake word."""
+        """Return the words that come after the (last) wake word."""
         clean = self._clean(text)
-        idx = clean.rfind(self.wake_word)
-        after = clean[idx + len(self.wake_word):] if idx >= 0 else clean
+        # Cut at the FIRST wake-word occurrence: the wake word is said at the
+        # start of the utterance. (Cutting at the last one breaks when a
+        # variant like 'button' is also misheard later in the question.)
+        start, end = -1, 0
+        for v in self.wake_variants:
+            i = clean.find(v)
+            if i >= 0 and (start < 0 or i < start):
+                start, end = i, i + len(v)
+        after = clean[end:] if start >= 0 else clean
         for _ in range(4):
             new = re.sub(
-                r"^(hey|hi|hello|buddy|buddies|can you|could you|please)\s+", "", after)
+                r"^(hey|hi|hello|buddy|buddies|button|can you|could you|please)\s+",
+                "", after)
             if new == after:
                 break
             after = new
@@ -321,27 +345,62 @@ class WakeWordListener:
             now = time.time()
 
             if state == "idle":
-                if self.wake_word in self._clean(final).split():
+                if self.hybrid and self.whisper is not None and final.strip():
+                    # Hybrid: Vosk only does endpointing ("someone spoke").
+                    # Whisper hears the wake word where Vosk fails, so it
+                    # gets the last word on whether this was 'buddy'.
+                    window = np.concatenate(list(self._ring)[-60:])
+                    audio = self._normalize_for_asr(
+                        self._trim_silence(window))
+                    if audio is None:
+                        continue
+                    # Directed questions are short. Long dense speech is
+                    # background conversation - decoding it takes 17-25s and
+                    # would block the wake loop, so skip it.
+                    if len(audio) / self.sample_rate > self.max_question_sec:
+                        print("  (long background speech - skipped)")
+                        continue
+                    text = self.whisper.transcribe(audio)
+                    if self._has_wake(text):
+                        q = self._after_wake(text)
+                        if self._meaningful(q):
+                            # Wake word + question in ONE utterance. Text is
+                            # already Whisper's - no second decode needed.
+                            return q, audio
+                        print("  ✓ Buddy! Say your question")
+                        state = "question"
+                        state_start = now
+                        self._cap = []
+                    else:
+                        # Not addressed to us - show what we heard
+                        print(f"  (heard: {text!r})")
+                        self._save_idle_audio()
+                elif self.wake_word in self._clean(final).split():
+                    # Vosk-only mode: trust Vosk's wake detection
                     q = self._after_wake(final)
                     if self._meaningful(q):
-                        # Wake word + question in ONE utterance: grab the
-                        # last 6s of raw audio from the ring buffer.
-                        audio = None
-                        if self.hybrid:
-                            window = np.concatenate(list(self._ring)[-60:])
-                            audio = self._trim_silence(window)
-                        return q, audio
+                        # Wake word + question in ONE utterance
+                        return q, None
                     print("  ✓ Buddy! Say your question")
                     state = "question"
                     state_start = now
                     if self.hybrid:
                         self._cap = []
+                elif final.strip():
+                    # Transparency: show what we heard when it wasn't 'buddy'
+                    # (helps debug missed wake words / mic placement).
+                    print(f"  (heard: {final!r})")
+                    self._save_idle_audio()
             else:  # already heard wake word, waiting for the question
                 if self._meaningful(final):
                     audio = None
-                    if self.hybrid:
-                        audio = (self._trim_silence(np.concatenate(self._cap))
-                                 if self._cap else None)
+                    if self.hybrid and self._cap:
+                        audio = self._normalize_for_asr(
+                            self._trim_silence(np.concatenate(self._cap)))
+                    if self.hybrid and audio is not None:
+                        # Return empty text: main.py transcribes the capture
+                        # (the wake word itself isn't in this audio).
+                        return "", audio
                     return final, audio
                 state_start = now  # was noise, keep waiting
 
@@ -352,6 +411,40 @@ class WakeWordListener:
                 state_start = now
                 if self.hybrid:
                     self._cap = []
+
+    def _has_wake(self, text: str) -> bool:
+        """True if any wake-word variant appears in the transcript."""
+        return any(w in self.wake_variants for w in self._clean(text).split())
+
+    def _normalize_for_asr(self, audio, target_peak: float = 0.9,
+                           max_gain: float = 6.0):
+        """Raise quiet audio before transcription (bounded gain)."""
+        if audio is None:
+            return None
+        peak = float(np.abs(audio).max())
+        if peak < 1e-4 or peak >= target_peak:
+            return audio
+        return audio * min(target_peak / peak, max_gain)
+
+    def _save_idle_audio(self):
+        """Save the last 6s of audio when a non-wake final arrived (debug)."""
+        if not (self.hybrid and self.debug_audio):
+            return
+        try:
+            import wave
+            path = Path(__file__).parent.parent / "logs" / "audio" / \
+                f"idle-{int(time.time() * 1000)}.wav"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            win = np.concatenate(list(self._ring)[-60:])
+            pcm = (np.clip(win, -1.0, 1.0) * 32767).astype(np.int16)
+            with wave.open(str(path), "wb") as w:
+                w.setnchannels(1)
+                w.setsampwidth(2)
+                w.setframerate(self.sample_rate)
+                w.writeframes(pcm.tobytes())
+            print(f"  \U0001f399 idle audio saved: {path.name}")
+        except Exception as e:
+            print(f"  (idle audio save failed: {e})")
 
     def watch_for_stop(self, stream, stop_event, watching):
         """
