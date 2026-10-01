@@ -13,6 +13,7 @@ import numpy as np
 import sounddevice as sd
 
 from stt_engine import WakeWordListener
+from whisper_engine import WhisperSTT
 from llm_engine import LocalLLM
 from knowledge_base import KnowledgeBase
 from tts_engine import TextToSpeech
@@ -25,7 +26,8 @@ def beep(freq=880, dur=0.7):
 
 
 print("Setting up components...", flush=True)
-wake = WakeWordListener(wake_word="buddy")
+wake = WakeWordListener(wake_word="buddy", model_size="small", hybrid=True)
+whisper = WhisperSTT(model_size="small.en")
 llm = LocalLLM()
 kb = KnowledgeBase()
 tts = TextToSpeech()
@@ -40,7 +42,11 @@ time.sleep(1)
 beep()
 beep()
 
-q = wake.wait_for_question(stream)
+q, q_audio = wake.wait_for_question(stream)
+if q_audio is not None:
+    w = whisper.transcribe(q_audio)
+    if w:
+        q = w
 print(f"\n>>> CAPTURED QUESTION: {q!r}", flush=True)
 
 if q:
@@ -48,9 +54,12 @@ if q:
     ans = llm.query_with_rag(q, kb, top_k=3)
     print(f">>> ANSWER: {ans}", flush=True)
     stop_ev = threading.Event()
-    w = threading.Thread(target=wake.watch_for_stop, args=(stream, stop_ev), daemon=True)
+    watching = threading.Event()
+    watching.set()
+    w = threading.Thread(target=wake.watch_for_stop, args=(stream, stop_ev, watching), daemon=True)
     w.start()
     tts.speak(ans, on_interrupt=stop_ev.is_set)
+    watching.clear()
     w.join(timeout=1)
     if stop_ev.is_set():
         print(">>> INTERRUPTED by STOP", flush=True)

@@ -9,27 +9,28 @@ cd models
 echo "=== Downloading AI Models ==="
 
 # 1. Vosk STT models - if missing
-#    large (1.3GB) = much more accurate (default); small (68MB) = fallback
-if [ ! -d "vosk-model-en-us-0.22" ]; then
-    echo "1/3: Vosk STT large model (1.3GB)..."
-    wget -q https://alphacephei.com/vosk/models/vosk-model-en-us-0.22.zip
-    unzip -q vosk-model-en-us-0.22.zip
-    rm vosk-model-en-us-0.22.zip
-else
-    echo "1/3: Vosk STT large model - already present"
-fi
+#    small (68MB) = always-on wake word in hybrid mode
+#    large (1.3GB) = for question_engine: vosk (A/B)
 if [ ! -d "vosk-model-small-en-us-0.15" ]; then
-    echo "      Vosk STT small model (68MB fallback)..."
+    echo "1/4: Vosk STT small model (68MB)..."
     wget -q https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip
     unzip -q vosk-model-small-en-us-0.15.zip
     rm vosk-model-small-en-us-0.15.zip
 else
-    echo "      Vosk STT small model - already present"
+    echo "1/4: Vosk STT small model - already present"
+fi
+if [ ! -d "vosk-model-en-us-0.22" ]; then
+    echo "      Vosk STT large model (1.3GB, optional)..."
+    wget -q https://alphacephei.com/vosk/models/vosk-model-en-us-0.22.zip
+    unzip -q vosk-model-en-us-0.22.zip
+    rm vosk-model-en-us-0.22.zip
+else
+    echo "      Vosk STT large model - already present"
 fi
 
 # 2. Piper TTS voice (61MB) - if missing
 if [ ! -f "en_US-lessac-medium.onnx" ]; then
-    echo "2/3: Piper TTS voice (61MB)..."
+    echo "2/4: Piper TTS voice (61MB)..."
     wget -q "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx"
     wget -q "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json"
 else
@@ -38,7 +39,7 @@ fi
 
 # 3. Qwen2-1.5B LLM (941MB) - if missing
 if [ ! -f "qwen2-1.5b-instruct.Q4_K_M.gguf" ]; then
-    echo "3/3: Qwen2-1.5B LLM (941MB)..."
+    echo "3/4: Qwen2-1.5B LLM (941MB)..."
     wget -q "https://huggingface.co/Qwen/Qwen2-1.5B-Instruct-GGUF/resolve/main/qwen2-1_5b-instruct-q4_k_m.gguf" -O qwen2-1.5b-instruct.Q4_K_M.gguf
 else
     echo "3/3: Qwen2-1.5B LLM - already present"
@@ -53,9 +54,22 @@ if [ ! -f "phi-3-mini-4k-instruct.Q4_K_M.gguf" ]; then
     fi
 fi
 
+# 4. Whisper STT model (small.en, ~460MB) - if missing
+#    First run downloads it from HuggingFace into ~/.cache/huggingface.
+if [ -d "$HOME/.cache/huggingface/hub/models--Systran--faster-whisper-small.en" ]; then
+    echo "4/4: Whisper STT model - already present"
+else
+    echo "4/4: Whisper STT model (small.en, ~460MB)..."
+    if [ -x "../venv/bin/python" ]; then
+        ../venv/bin/python -c "from faster_whisper import WhisperModel; WhisperModel('small.en', device='cpu', compute_type='int8')"
+    else
+        echo "   (skipped - run: venv/bin/python -c \"from faster_whisper import WhisperModel; WhisperModel('small.en')\")"
+    fi
+fi
+
 echo ""
 echo "=== Done! Models in $(pwd) ==="
 ls -lh *.gguf *.onnx* 2>/dev/null
 echo ""
 echo "To switch LLM: edit config/settings.yaml -> llm.model"
-echo "To switch STT: edit config/settings.yaml -> stt.model_size (small|large)"
+echo "To switch STT: edit config/settings.yaml -> stt.question_engine (whisper|vosk)"

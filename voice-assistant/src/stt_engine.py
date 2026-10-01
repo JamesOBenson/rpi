@@ -10,6 +10,7 @@ import json
 import os
 import re
 import time
+from collections import deque
 import numpy as np
 import sounddevice as sd
 from pathlib import Path
@@ -198,7 +199,8 @@ class WakeWordListener:
         model_size: str = "small",
         wake_word: str = "buddy",
         sample_rate: int = 16000,
-        question_timeout: float = 12.0
+        question_timeout: float = 12.0,
+        hybrid: bool = False
     ):
         if model_path is None:
             model_name = VOSK_MODELS.get(model_size, model_size)
@@ -213,6 +215,11 @@ class WakeWordListener:
         self.wake_word = wake_word.lower()
         self.sample_rate = sample_rate
         self.question_timeout = question_timeout
+        # Hybrid mode: keep raw audio around so a stronger engine (Whisper)
+        # can transcribe the question after Vosk hears the wake word.
+        self.hybrid = hybrid
+        self._ring = deque(maxlen=(sample_rate // 10) * 12)  # last 12s, 0.1s chunks
+        self._cap = []  # audio captured since the wake word
 
         print("Loading wake-word model (Vosk)...")
         # Suppress Kaldi C++ log spam during model load
@@ -251,10 +258,43 @@ class WakeWordListener:
             after = new
         return after.strip()
 
-    def wait_for_question(self, stream) -> str:
+    def _trim_silence(self, audio: Optional[np.ndarray],
+                      frame_ms: int = 50, peak_ratio: float = 0.15,
+                      floor: float = 30.0) -> Optional[np.ndarray]:
+        """
+        Trim leading/trailing silence from int16 16kHz audio.
+        Returns float32 (-1..1), or None if there's no real speech.
+        """
+        if audio is None or len(audio) < self.sample_rate // 2:
+            return None
+        frame = max(1, self.sample_rate * frame_ms // 1000)
+        n = len(audio) // frame
+        if n < 3:
+            return None
+        energies = np.abs(audio[: n * frame].reshape(n, frame).astype(np.float32)).mean(axis=1)
+        peak = float(energies.max())
+        if peak < floor:  # ~-40dBFS: nothing was said
+            return None
+        thr = max(floor, peak_ratio * peak)
+        voiced = np.nonzero(energies >= thr)[0]
+        if len(voiced) == 0:
+            return None
+        lo = max(0, int(voiced[0]) - 3)   # 0.15s pad before first speech
+        hi = min(n, int(voiced[-1]) + 4)  # 0.20s pad after last speech
+        out = audio[lo * frame: hi * frame].astype(np.float32) / 32768.0
+        # < 0.5s after trim = nothing real was said (blip + padding)
+        return out if len(out) >= self.sample_rate // 2 else None
+
+    def wait_for_question(self, stream):
         """
         Block on an open sounddevice InputStream until the wake word is
-        heard and a question is captured. Returns the question text.
+        heard and a question is captured.
+
+        Returns (question_text, question_audio):
+          - question_text: Vosk's transcript (always available)
+          - question_audio: 16kHz mono float32 of the question, or None in
+            non-hybrid mode. In hybrid mode a stronger engine (Whisper)
+            transcribes this and its text usually wins.
         """
         rec = self._rec()
         state = "idle"  # or "question"
@@ -263,7 +303,14 @@ class WakeWordListener:
 
         while True:
             data, _overflow = stream.read(chunk_frames)
-            chunk = (data.flatten() * 32767).astype(np.int16).tobytes()
+            pcm = (data.flatten() * 32767).astype(np.int16)
+            chunk = pcm.tobytes()
+
+            if self.hybrid:
+                self._ring.append(pcm)
+                if state == "question":
+                    self._cap.append(pcm)
+
             has_final = rec.AcceptWaveform(chunk)
 
             if not has_final:
@@ -277,13 +324,25 @@ class WakeWordListener:
                 if self.wake_word in self._clean(final).split():
                     q = self._after_wake(final)
                     if self._meaningful(q):
-                        return q
+                        # Wake word + question in ONE utterance: grab the
+                        # last 6s of raw audio from the ring buffer.
+                        audio = None
+                        if self.hybrid:
+                            window = np.concatenate(list(self._ring)[-60:])
+                            audio = self._trim_silence(window)
+                        return q, audio
                     print("  ✓ Buddy! Say your question")
                     state = "question"
                     state_start = now
+                    if self.hybrid:
+                        self._cap = []
             else:  # already heard wake word, waiting for the question
                 if self._meaningful(final):
-                    return final
+                    audio = None
+                    if self.hybrid:
+                        audio = (self._trim_silence(np.concatenate(self._cap))
+                                 if self._cap else None)
+                    return final, audio
                 state_start = now  # was noise, keep waiting
 
             # Timeout: heard 'buddy' but no question
@@ -291,6 +350,8 @@ class WakeWordListener:
                 print("  (no question heard - back to listening for 'Buddy')")
                 state = "idle"
                 state_start = now
+                if self.hybrid:
+                    self._cap = []
 
     def watch_for_stop(self, stream, stop_event, watching):
         """

@@ -12,7 +12,10 @@ sounddevice>=0.4.6
 soundfile>=0.12.1
 
 # Speech-to-Text (Offline)
+#   vosk           - always-on wake word (small model, streams in real time)
+#   faster-whisper - question transcription in hybrid mode (CPU, int8)
 vosk>=0.3.45
+faster-whisper>=1.0.0
 
 # Text-to-Speech (Offline)
 piper-tts>=1.2.0

@@ -17,6 +17,7 @@ License: MIT (Open Source)
 
 import asyncio
 import os
+import re
 import signal
 import sys
 import threading
@@ -30,6 +31,7 @@ from rich.panel import Panel
 
 # Import local modules
 from stt_engine import WakeWordListener
+from whisper_engine import WhisperSTT
 from tts_engine import TextToSpeech
 from llm_engine import LocalLLM
 from knowledge_base import KnowledgeBase
@@ -67,11 +69,21 @@ class STEMBuddy:
         # Initialize components
         self.led = LEDController(enabled=gpio_cfg.get("enabled", False))
         stt_cfg = self.config.get("stt", {})
-        # Continuous wake-word listener (always on the mic)
+        self.question_engine = stt_cfg.get("question_engine", "vosk").lower()
+        # Continuous wake-word listener (always on the mic).
+        # hybrid=True makes it also hand back the raw question audio so a
+        # stronger engine can re-transcribe it.
         self.wake = WakeWordListener(
             wake_word=self.wake_word,
-            model_size=stt_cfg.get("model_size", "small")
+            model_size=stt_cfg.get("model_size", "small"),
+            hybrid=(self.question_engine == "whisper")
         )
+        self.whisper = None
+        if self.question_engine == "whisper":
+            self.whisper = WhisperSTT(
+                model_size=stt_cfg.get("whisper_model", "small.en"),
+                cpu_threads=stt_cfg.get("whisper_threads", 4)
+            )
         self.tts = TextToSpeech()
         self.llm = LocalLLM(
             model_path=llm_cfg.get("model"),
@@ -122,7 +134,12 @@ class STEMBuddy:
                 )
 
                 # Blocks until "buddy" + question are captured
-                question = self.wake.wait_for_question(self.stream)
+                question, q_audio = self.wake.wait_for_question(self.stream)
+                if self.whisper is not None and q_audio is not None:
+                    # Hybrid: let the stronger engine transcribe the question
+                    w = self.whisper.transcribe(q_audio)
+                    if w:
+                        question = self._strip_wake(w)
                 if not question:
                     continue
 
@@ -165,6 +182,22 @@ class STEMBuddy:
                 console.print("[green]✓ Audio devices found[/green]")
         except Exception as e:
             console.print(f"[yellow]Could not check audio: {e}[/yellow]")
+
+    def _strip_wake(self, text: str) -> str:
+        """Remove a leading wake word / filler from a transcript.
+
+        Whisper keeps the 'Buddy,' it heard in the transcript; the Vosk
+        path already returns text with the wake word removed.
+        """
+        t = text.strip()
+        while True:
+            m = re.match(
+                r"^(?:buddy|buddies|hey|hi|hello|can you|could you|please)[,.!?;\s]*",
+                t, re.IGNORECASE
+            )
+            if not m or m.end() == 0:
+                return t.strip()
+            t = t[m.end():]
 
     def _process_question(self, question: str):
         """Process a question: stream RAG+LLM sentences, speak each as ready."""
