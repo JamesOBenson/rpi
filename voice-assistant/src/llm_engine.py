@@ -55,7 +55,12 @@ class LocalLLM:
         self.n_threads = n_threads
         self.llama = None
         
-        # Kid-friendly system prompt (no few-shot - they cause hallucinations)
+        # Kid-friendly system prompt (no few-shot - they cause hallucinations).
+        # Keep this SHORT: measured on the 1.5B model, adding an extra
+        # instruction (e.g. "guess what the child meant") made answers WORSE,
+        # and quoting a fallback line verbatim made the model parrot it.
+        # Garbled-input handling lives in main.py (unintelligible guard +
+        # RAG distance filter) instead.
         self.system_prompt = """You are STEM Buddy, a friendly AI for 4th-5th graders.
 Answer in 1-2 short sentences, simple words, under 40 words.
 Start directly - no labels, no names, no "Response:".

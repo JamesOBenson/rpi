@@ -49,6 +49,7 @@ STEM_FACTS = [
     {"id": "stem_023", "text": "Stars twinkle because of Earth's atmosphere. Starlight has to travel through many layers of moving air on its way to your eyes, and the air bends the light slightly as it goes. The bending changes from moment to moment, so the star's light flickers and shimmers. In space, with no air at all, stars do not twinkle - that is why they look steady in photos taken from orbit.", "metadata": {"topic": "space", "grade_level": "4-5", "source": "stem"}},
     {"id": "stem_024", "text": "An earthquake happens because Earth's crust is made of giant slabs of rock called tectonic plates, and they slowly creep along, a few centimeters a year. When two plates get stuck and then suddenly slip, the ground shakes. The shaking travels through the ground as waves, and scientists called seismologists measure them with instruments called seismographs.", "metadata": {"topic": "earth", "grade_level": "4-5", "source": "stem"}},
     {"id": "stem_025", "text": "Leaves are green in summer because of a molecule called chlorophyll, which plants use to turn sunlight into food. In autumn the days get shorter and the plant stops making chlorophyll, so other pigments that were hidden all along, like yellows and oranges, show through. Some trees, like maples, make brand-new red pigments in the fall.", "metadata": {"topic": "nature", "grade_level": "4-5", "source": "stem"}},
+    {"id": "stem_026", "text": "Sharks are fish, and they eat other fish, squid, and small sea animals - they do NOT eat cake! Sharks have no hard bones; their skeletons are made of cartilage, the same flexible material as your ear. Some sharks, like the great white, grow as long as a school bus, and they use a super-strong sense of smell to find their food.", "metadata": {"topic": "animals", "grade_level": "4-5", "source": "stem"}},
 ]
 
 
@@ -59,7 +60,8 @@ class KnowledgeBase:
         self,
         collection_name: str = "knowledge",
         persist_path: str = None,
-        cybersec_path: str = None
+        cybersec_path: str = None,
+        max_distance: float = 0.80
     ):
         """
         Initialize knowledge base.
@@ -68,10 +70,12 @@ class KnowledgeBase:
             collection_name: ChromaDB collection name
             persist_path: Path to persistent storage
             cybersec_path: Path to cybersecurity facts JSON
+            max_distance: Drop RAG hits farther than this (cosine distance)
         """
         self.collection_name = collection_name
         self.persist_path = Path(persist_path) if persist_path else PROJECT_ROOT / "data" / "chroma"
         self.cybersec_path = Path(cybersec_path) if cybersec_path else PROJECT_ROOT / "data" / "cybersecurity_facts.json"
+        self.max_distance = max_distance
         self.client = None
         self.collection = None
         self.total_facts = 0
@@ -200,10 +204,17 @@ class KnowledgeBase:
             formatted = []
             if results["documents"]:
                 for i, doc in enumerate(results["documents"][0]):
+                    dist = results["distances"][0][i] if results["distances"] else 0
+                    # Drop unrelated facts: a weakly-matching fact actively
+                    # confuses the 1.5B model (it answers the fact instead of
+                    # the question). 0.80 keeps real matches, including
+                    # garbled ones ("black horse" -> black hole: 0.72).
+                    if dist > self.max_distance:
+                        continue
                     formatted.append({
                         "text": doc,
                         "metadata": results["metadatas"][0][i] if results["metadatas"] else {},
-                        "distance": results["distances"][0][i] if results["distances"] else 0
+                        "distance": dist
                     })
                     
             return formatted

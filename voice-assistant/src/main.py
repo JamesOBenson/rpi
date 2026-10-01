@@ -64,7 +64,9 @@ class STEMBuddy:
 
         llm_cfg = self.config.get("llm", {})
         gpio_cfg = self.config.get("gpio", {})
-        self.top_k = self.config.get("rag", {}).get("top_k", 3)
+        rag_cfg = self.config.get("rag", {})
+        self.top_k = rag_cfg.get("top_k", 3)
+        self.similarity_threshold = rag_cfg.get("similarity_threshold", 0.8)
         self.wake_word = self.config.get("app", {}).get("wake_word", "buddy")
 
         # Initialize components
@@ -108,7 +110,9 @@ class STEMBuddy:
             n_ctx=llm_cfg.get("context_window", 512),
             n_threads=llm_cfg.get("threads", 8)
         )
-        self.knowledge_base = KnowledgeBase()
+        self.knowledge_base = KnowledgeBase(
+            max_distance=self.similarity_threshold
+        )
         self.interrupt = InterruptHandler(
             button_pin=gpio_cfg.get("button_pin", 4)
         )
@@ -162,14 +166,36 @@ class STEMBuddy:
                 if not question and self.whisper is not None and q_audio is not None:
                     # Separate-utterance case: wake word was its own sentence,
                     # so the question audio wasn't transcribed yet.
+                    question_source = None
                     if self.hailo is not None:
                         h = self._safe_hailo(q_audio)
                         if h and len(h.split()) >= 2:
                             question = self._strip_wake(h)
+                            question_source = "hailo"
                     if not question:
                         w = self.whisper.transcribe(q_audio)
                         if w:
                             question = self._strip_wake(w)
+                            question_source = "whisper"
+                else:
+                    question_source = self.wake.last_source
+                if question and question_source == "hailo" \
+                        and self.whisper is not None and q_audio is not None \
+                        and len(q_audio) < 3.5 * 16000:
+                    # Short-window re-judge: the Hailo 5s model is
+                    # out-of-distribution on <~3s of speech and garbles it
+                    # ("black holes" -> "black horse"). CPU Whisper handles
+                    # short audio fine; if it heard something usable, prefer
+                    # it. Keep the existing text if Whisper comes up empty.
+                    w = self.whisper.transcribe(q_audio)
+                    if w:
+                        w = w.strip()
+                        if self.wake._has_wake(w):
+                            cand = self.wake._after_wake(w)
+                        else:
+                            cand = self._strip_wake(w)
+                        if cand and len(cand.split()) >= 2:
+                            question = cand
                 if not question:
                     continue
 
@@ -222,6 +248,29 @@ class STEMBuddy:
                 console.print("[green]✓ Audio devices found[/green]")
         except Exception as e:
             console.print(f"[yellow]Could not check audio: {e}[/yellow]")
+
+    def _looks_unintelligible(self, question: str) -> bool:
+        """Heuristic: short, no question word, nothing related in the KB.
+
+        Threshold 0.75 (tighter than the RAG context filter at 0.8):
+        measured nearest-fact distances - real questions 0.22-0.72
+        (worst: "tell me your black horse" -> 0.72), misheard fragments
+        and non-questions 0.76-0.78 ("blah", "uh huh").
+        """
+        if len(question.split()) > 5:
+            return False
+        q = question.lower()
+        question_words = ("why", "how", "what", "when", "where", "who",
+                          "do", "does", "can", "is", "are", "tell me")
+        if any(w in q for w in question_words):
+            return False
+        try:
+            hits = self.knowledge_base.query(question, top_k=1)
+            if not hits:
+                return True
+            return hits[0]["distance"] > 0.75
+        except Exception:
+            return False
 
     def _safe_hailo(self, audio: np.ndarray) -> str:
         """Hailo transcription with automatic CPU fallback on any error."""
@@ -284,6 +333,17 @@ class STEMBuddy:
 
     def _process_question(self, question: str):
         """Process a question: stream RAG+LLM sentences, speak each as ready."""
+        if self._looks_unintelligible(question):
+            # A short fragment with no question word and nothing related in
+            # the fact base is almost always a misheard utterance. Ask for a
+            # repeat instead of answering nonsense ("I'm not sure" is a dead
+            # end for a 9-year-old).
+            self.led.set_state(LEDState.SPEAKING)
+            console.print("[yellow]▸ Sorry, I didn't catch that! Can you say it again?[/yellow]")
+            self.tts.speak("Sorry, I didn't catch that! Can you say it again?")
+            self.led.set_state(LEDState.IDLE)
+            return
+
         self.led.set_state(LEDState.THINKING)
         console.print("[yellow]Thinking...[/yellow]")
 

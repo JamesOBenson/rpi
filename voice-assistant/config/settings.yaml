@@ -79,7 +79,12 @@ rag:
   # chimeras answers when a third, weakly-related fact is in context
   # (bench: 10.4s vs 13.8s to first audio, cleaner answers).
   top_k: 2
-  similarity_threshold: 0.7
+  # Max cosine distance for a fact to be included in the LLM context.
+  # 0.80 keeps garbled-but-relevant matches ("black horse" -> black hole
+  # fact at 0.72) while dropping unrelated facts that confuse the model.
+  # A question with NO fact within this distance AND no question word
+  # triggers a "say it again?" prompt instead of a dead-end answer.
+  similarity_threshold: 0.8
 
 # GPIO Settings - Set enabled: false if Hailo HAT blocks the pins
 gpio:

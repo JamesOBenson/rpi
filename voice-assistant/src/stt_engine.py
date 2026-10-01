@@ -224,11 +224,20 @@ class WakeWordListener:
             "button", "body",
         ]))
         self.whisper = None  # set by main.py (wake-word judge + fallback)
-        self.hailo = None    # set by main.py when question_engine=hailo
+        self.hailo = None
+        # Which engine produced the last wake-word-confirmed transcript
+        # ("hailo" | "whisper" | None) - lets main.py skip a redundant
+        # short-window re-judge when Whisper already did the work.
+        self.last_source = None    # set by main.py when question_engine=hailo
         # Directed questions are short; longer voiced windows are treated as
         # background conversation and skipped (avoids 17-25s Whisper decodes
         # that would block the wake loop).
-        self.max_question_sec = 4.5
+        # Skip very long dense-voiced windows (TV, news, long rambles).
+        # Kept at 10s, not less: users who don't hear a response repeat
+        # their question, and repeated attempts fuse into 5-12s voiced
+        # windows that a tighter threshold swallows (measured in the field
+        # on 2026-10-01: seven repeat attempts skipped at 4.5s).
+        self.max_question_sec = 10.0
         self.sample_rate = sample_rate
         self.question_timeout = question_timeout
         # Hybrid mode: keep raw audio around so a stronger engine (Whisper)
@@ -366,14 +375,18 @@ class WakeWordListener:
                     # final judge - it still gets the last word, exactly as
                     # before.
                     text = ""
+                    self.last_source = None
                     if self.hailo is not None:
                         try:
                             text = self.hailo.transcribe(audio)
+                            if text:
+                                self.last_source = "hailo"
                         except Exception as e:
                             print(f"  (hailo error: {e})")
                             text = ""
                     if not self._has_wake(text):
                         text = self.whisper.transcribe(audio)
+                        self.last_source = "whisper"
                     if self._has_wake(text):
                         q = self._after_wake(text)
                         if self._meaningful(q):
