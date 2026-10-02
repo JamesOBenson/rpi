@@ -26,6 +26,12 @@ _STOP_WORDS = frozenset("""
     had i've you've we've s t don't
     """.split())
 
+# Qwen3 thinking tags. With /no_think the model emits an empty pair before
+# the answer; if it does think (rare), the stream guard drops everything
+# up to the closing tag so thinking text is never spoken.
+THINK_START = "\u003cthink\u003e"
+THINK_END = "\u003c/think\u003e"
+
 
 class LocalLLM:
     """Local LLM with RAG support."""
@@ -45,12 +51,17 @@ class LocalLLM:
             n_threads: Number of CPU threads
         """
         if model_path is None:
-            model_path = "qwen2-1.5b-instruct.Q4_K_M.gguf"
+            model_path = "gemma-3n-E2B-it-Q4_K_M.gguf"
         # Resolve: accept absolute, relative, or bare filename in models/
         p = Path(model_path)
         if not p.is_absolute() and not p.exists():
             p = PROJECT_ROOT / "models" / model_path
         self.model_path = p
+        # Model family drives chat template + stop tokens (see _build_prompt)
+        self._is_qwen = "qwen" in p.name.lower()
+        # llama.cpp requires n_ctx >= 1024 for Gemma 3(n) (RoPE min context)
+        if not self._is_qwen and n_ctx < 1024:
+            n_ctx = 1024
         self.n_ctx = n_ctx
         self.n_threads = n_threads
         self.llama = None
@@ -75,8 +86,9 @@ If you don't know, say "I'm not sure about that one!"""
             # Check if model exists
             if not self.model_path.exists():
                 print(f"⚠ Model not found: {self.model_path}")
-                print("  Download Phi-3-mini from HuggingFace:")
-                print("  https://huggingface.co/Mozilla/phi-3-mini-4k-instruct-gguf")
+                print("  Download Gemma 3n E2B from HuggingFace:")
+                print("  https://huggingface.co/unsloth/gemma-3n-E2B-it-GGUF/resolve/main/gemma-3n-E2B-it-Q4_K_M.gguf")
+                print("  (backup: Qwen3-1.7B - see download_models.sh)")
                 return
                 
             # Load model
@@ -143,18 +155,27 @@ If you don't know, say "I'm not sure about that one!"""
         buffer = ""
         yielded = 0
         started = False
+        past_think_end = False  # Qwen3: skip everything until THINK_END seen
         accepted = []  # sentences already spoken (for duplicate filtering)
         try:
             for output in self.llama(
                 prompt,
                 max_tokens=60,
                 temperature=0.3,
-                stop=["\n\nQ:", "\n\nQuestion:", "Question:", "###"],
+                stop=self._stop_tokens(),
                 echo=False,
                 stream=True
             ):
                 token = output["choices"][0]["text"]
                 if token:
+                    if self._is_qwen and not past_think_end:
+                        # Qwen3 emits an empty "\u003cthink\u003e"..."\u003c/think\u003e" pair (or a real
+                        # think block) before answering - never speak it.
+                        i = token.find(THINK_END)
+                        if i < 0:
+                            continue
+                        token = token[i + len(THINK_END):]
+                        past_think_end = True
                     buffer += token
                 # Emit any complete sentence(s) now sitting in the buffer
                 while True:
@@ -187,6 +208,8 @@ If you don't know, say "I'm not sure about that one!"""
         """Clean a single streamed sentence (prefix artifacts only on first)."""
         import re
         t = text.strip()
+        # Qwen3 thinking-tag remnants (stream guard normally handles these)
+        t = t.replace(THINK_START, "").replace(THINK_END, "").strip()
         if first:
             t = re.sub(r'^(response|assistant|answer|explanation|support)\s*:\s*', '', t, flags=re.IGNORECASE)
             t = re.sub(r'^[-*•]\s*', '', t)
@@ -212,18 +235,33 @@ If you don't know, say "I'm not sure about that one!"""
         return True
 
     def _build_prompt(self, question: str, context: List[Dict]) -> str:
-        """Build prompt with retrieved context (Qwen2 chat format)."""
+        """Build prompt with retrieved context (per-model chat format)."""
         # Combine context passages
         context_text = "\n".join([f"- {c['text']}" for c in context[:3]])
         
-        user_msg = f"Facts:\n{context_text}\n\nQ: {question}"
-        
-        prompt = (
-            f"<|im_start|>system\n{self.system_prompt}<|im_end|>\n"
-            f"<|im_start|>user\n{user_msg}<|im_end|>\n"
-            f"<|im_start|>assistant\n"
-        )
+        if self._is_qwen:
+            # Qwen3: /no_think disables the thinking phase (measured on Pi:
+            # 17.4s/138 tokens with thinking vs 2.9s/23 tokens without).
+            user_msg = f"Facts:\n{context_text}\n\nQ: {question} /no_think"
+            prompt = (
+                f"<|im_start|>system\n{self.system_prompt}\n<|im_end|>\n"
+                f"<|im_start|>user\n{user_msg}<|im_end|>\n"
+                f"<|im_start|>assistant\n"
+            )
+        else:
+            # Gemma 3(n) chat format (no thinking mode - nothing to disable)
+            user_msg = f"{self.system_prompt}\nFacts:\n{context_text}\n\nQ: {question}"
+            prompt = (
+                f"<start_of_turn>user\n{user_msg}\n<end_of_turn>\n"
+                f"<start_of_turn>model\n"
+            )
         return prompt
+        
+    def _stop_tokens(self) -> list:
+        """Stop sequences differ per chat format."""
+        if self._is_qwen:
+            return ["\n\nQ:", "\n\nQuestion:", "Question:", "###"]
+        return ["<end_of_turn>", "<start_of_turn>"]
         
     def _generate(self, prompt: str) -> str:
         """Generate response from LLM."""
@@ -232,7 +270,7 @@ If you don't know, say "I'm not sure about that one!"""
                 prompt,
                 max_tokens=60,
                 temperature=0.3,
-                stop=["\n\nQ:", "\n\nQuestion:", "Question:"],
+                stop=self._stop_tokens(),
                 echo=False
             )
             
@@ -246,6 +284,8 @@ If you don't know, say "I'm not sure about that one!"""
     def _clean_answer(self, text: str) -> str:
         """Remove LLM artifacts and enforce short kid-friendly length."""
         import re
+        # Qwen3 thinking tags (empty with /no_think)
+        text = text.replace(THINK_START, "").replace(THINK_END, "")
         
         # Remove common prefixes like "Response:", "Assistant:", "A:", etc.
         text = re.sub(r'^(response|assistant|answer|explanation|support)\s*:\s*', '', text, flags=re.IGNORECASE)
@@ -331,7 +371,7 @@ if __name__ == "__main__":
     # Mock knowledge base
     class MockKB:
         def query(self, q, top_k=3):
-            return [{"text": "Sample knowledge about the topic."}]
+            return [{"text": "The sky is blue because blue light scatters off air molecules more than red light."}]
             
     answer = llm.query_with_rag("What is gravity?", MockKB())
     print(f"\nQ: What is gravity?")

@@ -88,8 +88,8 @@ it can't find them.
 | Model load (startup) | ~9 sec |
 | Wake word + STT (Hailo) | ~0.8 sec |
 | RAG retrieval | ~0.3 sec |
-| LLM answer (Qwen2-1.5B, first sentence) | ~5.5 sec |
-| **Total: end-of-speech → first audio** | **~6.8 sec** |
+| LLM answer (Gemma 3n E2B, first sentence) | ~2.5 sec |
+| **Total: end-of-speech → first audio** | **~3.8 sec** |
 
 The STT stage runs Whisper on the **Hailo-8L** (~0.8s) instead of CPU
 (~1.8s). If the Hailo is absent, fails to load, or returns a transcript
@@ -97,7 +97,8 @@ without the wake word, it transparently falls back to CPU Whisper — the
 service still works, just ~1s slower. Set `stt.question_engine: "whisper"`
 in `config/settings.yaml` to skip Hailo entirely.
 
-Switch to the slower-but-deeper Phi-3 mini (~30s) via `config/settings.yaml`.
+Switch between Gemma 3n E2B (default) and the Qwen3-1.7B backup via
+`llm.model` in `config/settings.yaml`.
 
 ---
 
@@ -130,7 +131,7 @@ cd ~/voice-assistant
 
 ```
 Pi boots → systemd starts stem-buddy.service (after ~3s)
-         → loads Vosk endpointer, Hailo/CPU Whisper STT, Piper TTS, Qwen2 LLM, knowledge base
+         → loads Vosk endpointer, Hailo/CPU Whisper STT, Piper TTS, Gemma 3n LLM, knowledge base
          → ~20 seconds later: "Listening... (say 'Buddy' or just ask)"
 ```
 
@@ -178,7 +179,7 @@ voice-assistant/
 │   ├── hailo_whisper_engine.py # Question STT on Hailo-8L (Whisper HEFs)
 │   ├── whisper_engine.py    # CPU Whisper (wake-word judge + Hailo fallback)
 │   ├── tts_engine.py        # Text-to-speech (Piper)
-│   ├── llm_engine.py        # Local LLM (Phi-3)
+│   ├── llm_engine.py        # Local LLM (Gemma 3n E2B / Qwen3)
 │   ├── knowledge_base.py    # RAG with ChromaDB
 │   ├── audio_listener.py    # Audio capture
 │   ├── interrupt_handler.py # Button + voice interrupt
@@ -254,7 +255,7 @@ Space, animals, physics, inventions, nature
 Question → Vector Search (ChromaDB) → Top 3 Facts → LLM → Kid-Friendly Answer
 ```
 
-When the Phi-3 LLM is installed, it synthesizes the retrieved facts into a
+When the LLM (Gemma 3n E2B or Qwen3-1.7B) is installed, it synthesizes the retrieved facts into a
 natural answer. Without it, the best matching fact is spoken directly -
 still fast and accurate!
 
@@ -264,13 +265,13 @@ still fast and accurate!
 Mic → Wake Word → STT → RAG + LLM → TTS → Speakers
        │           │        │            │
    "Buddy"    Hailo/Whisper ChromaDB    Piper
-   (always-on) (Whisper judges) (1058 facts) (Qwen2-1.5B)
+   (always-on) (Whisper judges) (1058 facts) (Gemma 3n E2B)
 ```
 
 1. **Wake Word** - Always-on. Small Vosk model endpoints "someone spoke"; Whisper (CPU) judges whether it said "Buddy"
 2. **STT** - Transcribes the question. **Hailo-8L Whisper** (~0.8s) when available, CPU Whisper fallback
 3. **RAG** - Retrieves relevant facts (ChromaDB vector search)
-4. **LLM** - Generates kid-friendly answer (Qwen2-1.5B, streamed)
+4. **LLM** - Generates kid-friendly answer (Gemma 3n E2B, streamed; Qwen3-1.7B is the one-line backup)
 5. **TTS** - Converts answer to speech (Piper, streamed sentence by sentence)
 
 ---

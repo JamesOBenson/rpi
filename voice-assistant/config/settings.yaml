@@ -59,13 +59,15 @@ stt:
 
 llm:
   # Place .gguf files in models/
-  # qwen2-1.5b  = FAST (~5-10 sec answers), great for kids  * RECOMMENDED
-  # phi-3-mini  = slower (~30 sec answers), slightly deeper
-  model: "qwen2-1.5b-instruct.Q4_K_M.gguf"
-  context_window: 512
+  # gemma-3n-e2b = FAST (~2.5 sec to first sentence), on-device design  * RECOMMENDED
+  # qwen3-1.7b   = backup, same speed, equally good answers
+  # qwen3-4b     = much smarter but ~25-33 sec answers (too slow for voice - do not use)
+  model: "gemma-3n-E2B-it-Q4_K_M.gguf"
+  context_window: 512  # Gemma 3(n) auto-bumps to 1024 (llama.cpp minimum)
   max_tokens: 100
   temperature: 0.3
-  threads: 8
+  # This Pi exposes only the 4 fast A76 cores; 8 threads measured ~15% slower
+  threads: 4
 
 tts:
   engine: "piper"

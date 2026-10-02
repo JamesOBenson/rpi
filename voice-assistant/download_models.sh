@@ -37,20 +37,22 @@ else
     echo "2/3: Piper TTS voice - already present"
 fi
 
-# 3. Qwen2-1.5B LLM (941MB) - if missing
-if [ ! -f "qwen2-1.5b-instruct.Q4_K_M.gguf" ]; then
-    echo "3/4: Qwen2-1.5B LLM (941MB)..."
-    wget -q "https://huggingface.co/Qwen/Qwen2-1.5B-Instruct-GGUF/resolve/main/qwen2-1_5b-instruct-q4_k_m.gguf" -O qwen2-1.5b-instruct.Q4_K_M.gguf
+# 3. Gemma 3n E2B LLM (2.9GB) - if missing
+#    Backup: Qwen3-1.7B (1.2GB, prompted below) - equally good answers.
+#    Switch with llm.model in ../config/settings.yaml
+if [ ! -f "gemma-3n-E2B-it-Q4_K_M.gguf" ]; then
+    echo "3/4: Gemma 3n E2B LLM (2.9GB)..."
+    wget -q "https://huggingface.co/unsloth/gemma-3n-E2B-it-GGUF/resolve/main/gemma-3n-E2B-it-Q4_K_M.gguf" -O gemma-3n-E2B-it-Q4_K_M.gguf
 else
-    echo "3/3: Qwen2-1.5B LLM - already present"
+    echo "3/4: Gemma 3n E2B LLM - already present"
 fi
 
-# Optional: Phi-3 mini (2.3GB) - deeper but slower (~30s answers)
-if [ ! -f "phi-3-mini-4k-instruct.Q4_K_M.gguf" ]; then
-    read -p "Also download Phi-3 mini (2.3GB, slower but deeper)? [y/N] " reply
-    if [[ "$reply" =~ ^[Yy]$ ]]; then
-        echo "  Downloading Phi-3 mini (2.3GB)..."
-        wget -q "https://huggingface.co/bartowski/Phi-3-mini-4k-instruct-GGUF/resolve/main/Phi-3-mini-4k-instruct-Q4_K_M.gguf" -O phi-3-mini-4k-instruct.Q4_K_M.gguf
+# Optional: Qwen3-1.7B backup (1.2GB) - equally good answers, smaller
+if [ ! -f "Qwen3-1.7B-Q4_K_M.gguf" ]; then
+    read -p "Also download Qwen3-1.7B backup (1.2GB)? [Y/n] " reply
+    if [[ ! "$reply" =~ ^[Nn]$ ]]; then
+        echo "  Downloading Qwen3-1.7B (1.2GB)..."
+        wget -q "https://huggingface.co/ggml-org/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q4_K_M.gguf" -O Qwen3-1.7B-Q4_K_M.gguf
     fi
 fi
 
