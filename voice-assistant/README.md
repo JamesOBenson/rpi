@@ -1,7 +1,7 @@
 # 🤖 STEM Buddy
 
 **An offline voice assistant for kids**  
-Built for Raspberry Pi 5 with Hailo-8L AI accelerator
+Built for Raspberry Pi 5 (Hailo-8L AI accelerator optional)
 
 > Say "Hey Buddy" and ask anything about science, space, animals, or inventions!
 
@@ -9,7 +9,7 @@ Built for Raspberry Pi 5 with Hailo-8L AI accelerator
 
 ## 🎯 What is STEM Buddy?
 
-STEM Buddy is a **completely offline** voice assistant designed to spark curiosity in 4th and 5th graders (ages 9-11). It runs entirely on a Raspberry Pi 5 with 8GB RAM and a Hailo-8L AI accelerator.
+STEM Buddy is a **completely offline** voice assistant designed to spark curiosity in 4th and 5th graders (ages 9-11). It runs entirely on a Raspberry Pi 5 with 8GB RAM. The Hailo-8L AI accelerator is **optional**: with it, Whisper speech-to-text runs on the chip (~0.8s); without it, the same Whisper model runs on CPU (~1.8s) automatically.
 
 ### Key Features
 
@@ -28,13 +28,13 @@ STEM Buddy is a **completely offline** voice assistant designed to spark curiosi
 | Component | Required | Notes |
 |-----------|----------|-------|
 | Raspberry Pi 5 (8GB) | ✅ | Main computer |
-| Hailo-8L AI HAT | ✅ | Accelerates Whisper speech-to-text |
+| Hailo-8L AI HAT | ⚠️ | Optional - accelerates Whisper STT (~0.8s vs ~1.8s CPU); the service falls back to CPU Whisper automatically if it's absent |
 | USB Microphone | ✅ | Any decent USB mic works |
 | USB Speakers | ✅ | Or 3.5mm audio output |
 | Push Button | ⚠️ | For interrupt (can skip) |
 | RGB LED | ⚠️ | Visual feedback (can skip) |
 
-### Total Cost: ~$300-400 (excluding Pi/Hailo)
+### Total Cost: ~$300-400 (excluding Pi; Hailo-8L is optional)
 
 ---
 
@@ -176,7 +176,7 @@ voice-assistant/
 │   ├── main.py              # Main orchestrator
 │   ├── wake_word.py         # Wake word detection
 │   ├── stt_engine.py        # Wake word + endpointing (Vosk), question routing
-│   ├── hailo_whisper_engine.py # Question STT on Hailo-8L (Whisper HEFs)
+│   ├── hailo_whisper_engine.py # Question STT on Hailo-8L (optional)
 │   ├── whisper_engine.py    # CPU Whisper (wake-word judge + Hailo fallback)
 │   ├── tts_engine.py        # Text-to-speech (Piper)
 │   ├── llm_engine.py        # Local LLM (Gemma 3n E2B / Qwen3)
@@ -269,7 +269,7 @@ Mic → Wake Word → STT → RAG + LLM → TTS → Speakers
 ```
 
 1. **Wake Word** - Always-on. Small Vosk model endpoints "someone spoke"; Whisper (CPU) judges whether it said "Buddy"
-2. **STT** - Transcribes the question. **Hailo-8L Whisper** (~0.8s) when available, CPU Whisper fallback
+2. **STT** - Transcribes the question. **Hailo-8L Whisper** (~0.8s) when a Hailo is installed, CPU Whisper otherwise
 3. **RAG** - Retrieves relevant facts (ChromaDB vector search)
 4. **LLM** - Generates kid-friendly answer (Gemma 3n E2B, streamed; Qwen3-1.7B is the one-line backup)
 5. **TTS** - Converts answer to speech (Piper, streamed sentence by sentence)
@@ -311,7 +311,7 @@ Download models manually from URLs in setup instructions.
 ### "Slow responses"
 - Use smaller Vosk model (`vosk-model-small-en-us-0.15`) - already the default
 - Reduce LLM context window in config
-- Use `stt.question_engine: "hailo"` - Whisper on the Hailo-8L chip (default)
+- Use `stt.question_engine: "hailo"` - Whisper on the Hailo-8L chip (default; set to `"whisper"` for CPU-only)
 
 ---
 
