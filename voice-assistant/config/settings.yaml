@@ -58,7 +58,7 @@ stt:
   # whisper_model (measured on Pi 5, int8, 4 threads):
   #   base.en  = ~0.5x real-time decode, near-perfect  * RECOMMENDED
   #   small.en = ~1.5x real-time decode, perfect (costs +3s per question)
-  whisper_model: "base.en"
+  whisper_model: "small.en"
   # whisper_threads: 4 = the fast A76 cores only. 8 threads hits the slow
   # A55s and is ~2x slower (measured). Leave 4 on the Pi 5.
   whisper_threads: 4
@@ -88,9 +88,10 @@ tts:
   # HTTP server settings (mode: "http")
   http_server_url: "http://127.0.0.1:8766"
   http_timeout: 30.0
-  # Voice model (Piper voices from https://rhasspy.github.io/piper/)
-  # en_US-amy-medium = natural female voice, medium quality
-  voice: "en_US-amy-medium"
+  # Voice settings
+  voice: "en_US-amy-medium"  # Natural female voice
+  speed: 0.9  # Overall speed multiplier (0.8-1.2)
+  length_scale: 0.8  # Speech rate (0.8-1.2, lower = faster)
   output_format: "wav"
   pitch: 1.0
 
