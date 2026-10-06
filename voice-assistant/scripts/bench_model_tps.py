@@ -109,27 +109,30 @@ def main():
     for _ in range(3):
         llm.reset()
         first = None; toks = 0; t0 = time.time()
-        past_think_end = not is_qwen
+        buffer = ""
         for out in llm(prompt, max_tokens=100, temperature=0.3,
                        stop=stop, stream=True):
             t = out["choices"][0].get("text")
             if not t:
                 continue
-            if not past_think_end:
-                i = t.find(THINK_END)
-                if i < 0:
-                    continue
-                t = t[i + len(THINK_END):]
-                past_think_end = True
-            if t:
+            buffer += t
+            # Skip think tags for Qwen models
+            if is_qwen and THINK_END in buffer:
+                idx = buffer.find(THINK_END)
+                buffer = buffer[idx + len(THINK_END):]
+            if buffer:
                 if first is None:
                     first = time.time() - t0
                 toks += 1
+                buffer = ""
         total = time.time() - t0
         if first is not None and total > first and toks > 1:
             rates.append((toks - 1) / (total - first))
-    print(f"[{label}] generation {statistics.median(rates):.1f} t/s "
-          f"(range {min(rates):.1f}-{max(rates):.1f})")
+    if rates:
+        print(f"[{label}] generation {statistics.median(rates):.1f} t/s "
+              f"(range {min(rates):.1f}-{max(rates):.1f})")
+    else:
+        print(f"[{label}] generation: no tokens generated")
 
 
 if __name__ == "__main__":

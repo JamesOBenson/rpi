@@ -17,6 +17,27 @@ from pathlib import Path
 from typing import Optional
 from vosk import Model, KaldiRecognizer
 
+# ASR non-speech marker spans: '[Music]', '(clanking)',
+# '(speaking in foreign language)', '[BLANK_AUDIO]', ...
+_MARKER_SPAN = re.compile(r"[\[\(][^\]\)]*[\]\)]")
+
+
+def is_nonspeech(text: str) -> bool:
+    """True if the transcript has <2 real words left after removing ASR
+    non-speech markers. Whisper's no_speech_prob can't catch music - it
+    scores music like speech (measured 0.17 on a pure-music file vs 0.09
+    on real speech) - so marker detection is the only honest signal."""
+    if not text or not text.strip():
+        return True
+    stripped = _MARKER_SPAN.sub(" ", text)
+    words = [w for w in stripped.split() if any(c.isalpha() for c in w)]
+    return len(words) < 2
+
+
+def strip_markers(text: str) -> str:
+    """Remove ASR marker spans so they never reach the LLM or TTS readback."""
+    return re.sub(r"\s+", " ", _MARKER_SPAN.sub(" ", text)).strip()
+
 # Project root (parent of src/)
 PROJECT_ROOT = Path(__file__).parent.parent
 
@@ -201,7 +222,13 @@ class WakeWordListener:
         sample_rate: int = 16000,
         question_timeout: float = 12.0,
         hybrid: bool = False,
-        debug_audio: bool = False
+        debug_audio: bool = False,
+        framework: str = "fallback",
+        sensitivity: float = 0.6,
+        access_key: str = "",
+        keyword: str = "",
+        keyword_path: str = "",
+        wake_confidence: float = 0.3,
     ):
         if model_path is None:
             model_name = VOSK_MODELS.get(model_size, model_size)
@@ -229,6 +256,10 @@ class WakeWordListener:
         # ("hailo" | "whisper" | None) - lets main.py skip a redundant
         # short-window re-judge when Whisper already did the work.
         self.last_source = None    # set by main.py when question_engine=hailo
+        # Audio of the utterance that contained the wake word (the kid who
+        # said "buddy") - speaker-lock reference for SpeakerFilter. Float32
+        # 16k, starts at the utterance, ~3s max, set in wait_for_question.
+        self.last_wake_audio = None
         # Directed questions are short; longer voiced windows are treated as
         # background conversation and skipped (avoids 17-25s Whisper decodes
         # that would block the wake loop).
@@ -246,6 +277,48 @@ class WakeWordListener:
         self.debug_audio = debug_audio
         self._ring = deque(maxlen=120)  # last 12s of 0.1s chunks
         self._cap = []  # audio captured since the wake word
+        # Porcupine: dedicated keyword spotter for the wake word. Runs on
+        # every idle chunk (32ms frames), costs ~no CPU, and ignores
+        # background speech (TV) that Whisper would transcribe for 5-20s.
+        # If unavailable (not installed / no access key) the Whisper
+        # wake-word judge keeps working - graceful degradation.
+        self.porcupine = None
+        self._pv_buf = np.zeros(0, dtype=np.int16)
+        # Grammar-constrained wake word: a second recognizer that can ONLY
+        # output the wake word (or nothing). TV sentences map to ""; a real
+        # "buddy" near the mic maps to "buddy" with a word confidence. No
+        # transcription of idle audio at all - the 5-36s Whisper/Hailo
+        # decodes of TV speech are gone. Runs on the already-loaded Vosk
+        # model, so it costs almost nothing.
+        self.wake_rec = None
+        self.wake_conf = wake_confidence
+        if framework == "porcupine":
+            try:
+                import pvporcupine
+                kw = {"access_key": access_key,
+                      "sensitivities": [sensitivity]}
+                if keyword_path:
+                    p = Path(keyword_path)
+                    if not p.is_absolute():
+                        p = PROJECT_ROOT / p
+                    if not p.exists():
+                        raise RuntimeError(f"keyword file missing: {p}")
+                    kw["keyword_paths"] = [str(p)]
+                elif keyword in pvporcupine.KEYWORDS:
+                    kw["keywords"] = [keyword]
+                else:
+                    raise RuntimeError(
+                        f"no keyword: '{keyword or wake_word}' is not a "
+                        f"built-in (set keyword_path to a .ppn file)")
+                # v4 factory: resolves library/model/keyword paths
+                # (one-time download on first use, offline after).
+                self.porcupine = pvporcupine.create(**kw)
+                print(f"\u2713 Porcupine wake word ready "
+                      f"(keyword: {keyword or Path(keyword_path).name}, "
+                      f"sensitivity {sensitivity})")
+            except Exception as e:
+                print(f"\u26a0 Porcupine unavailable ({e}) - "
+                      f"falling back to Whisper wake-word judge")
 
         print("Loading wake-word model (Vosk)...")
         # Suppress Kaldi C++ log spam during model load
@@ -259,6 +332,15 @@ class WakeWordListener:
             os.close(_devnull)
             os.close(_err)
         print(f"✓ Wake-word listener ready (Vosk model: {self.model_name}, always listening)")
+
+        if framework == "vosk":
+            # Model is loaded now - build the grammar-constrained wake word.
+            self.wake_rec = KaldiRecognizer(
+                self.model, self.sample_rate,
+                json.dumps([self.wake_word, f"hey {self.wake_word}"]))
+            self.wake_rec.SetWords(True)
+            print(f"\u2713 Grammar wake word ready "
+                  f"('{self.wake_word}', conf \u2265 {wake_confidence})")
 
     def _rec(self):
         return KaldiRecognizer(self.model, self.sample_rate)
@@ -313,8 +395,14 @@ class WakeWordListener:
         voiced = np.nonzero(energies >= thr)[0]
         if len(voiced) == 0:
             return None
+        # Tail is more forgiving than head: a word's ending (the nasal
+        # in "-ing", rising question intonation) often drops below 15%
+        # of peak relative to a loud "Hey buddy" at the start, and a
+        # tight tail-trim clips the last word mid-syllable.
+        thr_tail = max(floor, 0.05 * peak)
+        tail = np.nonzero(energies >= thr_tail)[0]
         lo = max(0, int(voiced[0]) - 3)   # 0.15s pad before first speech
-        hi = min(n, int(voiced[-1]) + 4)  # 0.20s pad after last speech
+        hi = min(n, int(tail[-1]) + 6)    # 0.30s pad after last soft speech
         out = audio[lo * frame: hi * frame].astype(np.float32) / 32768.0
         # < 0.5s after trim = nothing real was said (blip + padding)
         return out if len(out) >= self.sample_rate // 2 else None
@@ -339,11 +427,58 @@ class WakeWordListener:
             data, _overflow = stream.read(chunk_frames)
             pcm = (data.flatten() * 32767).astype(np.int16)
             chunk = pcm.tobytes()
+            now = time.time()
 
             if self.hybrid:
                 self._ring.append(pcm)
                 if state == "question":
                     self._cap.append(pcm)
+
+            if self.porcupine is not None and state == "idle":
+                # Porcupine wants fixed 512-sample (32ms) frames; a 0.1s
+                # chunk isn't a whole number of them, so carry the remainder.
+                buf = np.concatenate([self._pv_buf, pcm])
+                fl = self.porcupine.frame_length
+                n = (len(buf) // fl) * fl
+                self._pv_buf = buf[n:].copy()
+                for f in range(n // fl):
+                    if self.porcupine.process(buf[f * fl:(f + 1) * fl]) >= 0:
+                        # Wake word heard. Capture the rest of the
+                        # utterance (the question) until the next Vosk
+                        # endpoint. Last 1.5s of the ring holds the wake
+                        # word itself - speaker-lock reference.
+                        tail = np.concatenate(list(self._ring)[-15:])
+                        self.last_wake_audio = (tail / 32768.0
+                                                ).astype(np.float32)
+                        print("  \u2713 Wake word! Say your question")
+                        state = "question"
+                        state_start = now
+                        self._cap = []
+                        break
+
+            if self.wake_rec is not None and state == "idle":
+                # Grammar recognizer endpointing is independent of rec's.
+                if self.wake_rec.AcceptWaveform(chunk):
+                    res = json.loads(self.wake_rec.FinalResult())
+                    self.wake_rec.Reset()
+                    text = res.get("text", "")
+                    if self.wake_word in text.split():
+                        confs = [r.get("conf", 0.0)
+                                 for r in res.get("result", [])]
+                        conf = max(confs) if confs else 0.0
+                        if conf >= self.wake_conf:
+                            if self.hybrid:
+                                # Speaker-lock reference: the ring's last
+                                # 1.5s holds the wake word itself.
+                                tail = np.concatenate(
+                                    list(self._ring)[-15:])
+                                self.last_wake_audio = (tail / 32768.0
+                                                        ).astype(np.float32)
+                                self._cap = []
+                            print(f"  \u2713 Wake word! (conf {conf:.2f}) "
+                                  f"Say your question")
+                            state = "question"
+                            state_start = now
 
             has_final = rec.AcceptWaveform(chunk)
 
@@ -355,7 +490,9 @@ class WakeWordListener:
             now = time.time()
 
             if state == "idle":
-                if self.hybrid and self.whisper is not None and final.strip():
+                if (self.hybrid and self.whisper is not None
+                        and self.porcupine is None and self.wake_rec is None
+                        and final.strip()):
                     # Hybrid: Vosk only does endpointing ("someone spoke").
                     # Whisper hears the wake word where Vosk fails, so it
                     # gets the last word on whether this was 'buddy'.
@@ -385,9 +522,19 @@ class WakeWordListener:
                             print(f"  (hailo error: {e})")
                             text = ""
                     if not self._has_wake(text):
+                        if text and is_nonspeech(text):
+                            # Hailo only heard music/noise: whisper will
+                            # hallucinate on it (measured 5-17s of fluent
+                            # garbage, still no wake word). Skip the decode.
+                            print("  (music/noise - skipping)")
+                            self._save_idle_audio()
+                            continue
                         text = self.whisper.transcribe(audio)
                         self.last_source = "whisper"
                     if self._has_wake(text):
+                        # The trimmed window starts at the kid's utterance
+                        # ("buddy ..."): keep it as the speaker reference.
+                        self.last_wake_audio = audio[: int(3 * self.sample_rate)]
                         q = self._after_wake(text)
                         if self._meaningful(q):
                             # Wake word + question in ONE utterance. Text is
@@ -412,9 +559,12 @@ class WakeWordListener:
                     state_start = now
                     if self.hybrid:
                         self._cap = []
-                elif final.strip():
-                    # Transparency: show what we heard when it wasn't 'buddy'
-                    # (helps debug missed wake words / mic placement).
+                elif final.strip() and self.porcupine is None \
+                        and self.wake_rec is None:
+                    # Transparency: show what we heard when it wasn't the
+                    # wake word (helps debug missed wake words / mic
+                    # placement). Skipped in Porcupine mode: idle speech is
+                    # deliberately NOT transcribed (that's the point).
                     print(f"  (heard: {final!r})")
                     self._save_idle_audio()
             else:  # already heard wake word, waiting for the question

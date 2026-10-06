@@ -31,9 +31,11 @@ from rich.console import Console
 from rich.panel import Panel
 
 # Import local modules
-from stt_engine import WakeWordListener
+from stt_engine import WakeWordListener, is_nonspeech, strip_markers
 from whisper_engine import WhisperSTT
+from whisper_client import WhisperClient
 from tts_engine import TextToSpeech
+from tts_client import TTSClient
 from llm_engine import LocalLLM
 from knowledge_base import KnowledgeBase
 from interrupt_handler import InterruptHandler
@@ -74,25 +76,61 @@ class STEMBuddy:
         stt_cfg = self.config.get("stt", {})
         self.stt_cfg = stt_cfg
         self.question_engine = stt_cfg.get("question_engine", "whisper").lower()
-        # Continuous wake-word listener (always on the mic).
-        # hybrid=True makes it also hand back the raw question audio so a
-        # stronger engine can re-transcribe it.
-        self.wake = WakeWordListener(
-            wake_word=self.wake_word,
-            model_size=stt_cfg.get("model_size", "small"),
-            hybrid=(self.question_engine in ("whisper", "hailo")),
-            debug_audio=stt_cfg.get("debug_audio", False)
-        )
+        
+        # Wake word detection
+        ww_cfg = self.config.get("wake_word", {})
+        ww_framework = ww_cfg.get("framework", "openwakeword").lower()
+        
+        # Initialize wake word listener based on framework
+        self.wake = None
+        if ww_framework == "openwakeword":
+            try:
+                from openwakeword_listener import OpenWakeWordListener
+                wake_words = [w.strip() for w in ww_cfg.get("wake_words", "buddy").split(",")]
+                self.wake = OpenWakeWordListener(
+                    wake_words=wake_words,
+                    threshold=ww_cfg.get("threshold", 0.5),
+                    cooldown=ww_cfg.get("cooldown", 1.5),
+                )
+                print(f"✓ Using OpenWakeWord (wake words: {wake_words})")
+            except Exception as e:
+                print(f"⚠ OpenWakeWord unavailable ({e}) - falling back to Vosk")
+                ww_framework = "vosk"
+        
+        if ww_framework == "vosk" or self.wake is None:
+            # Fallback to Vosk
+            self.wake = WakeWordListener(
+                wake_word=self.wake_word,
+                model_size=stt_cfg.get("model_size", "small"),
+                hybrid=(self.question_engine in ("whisper", "hailo")),
+                debug_audio=stt_cfg.get("debug_audio", False),
+                framework="vosk",
+                wake_confidence=ww_cfg.get("wake_confidence", 0.3),
+            )
+            print(f"✓ Using Vosk wake word detection")
+        
+        # Start OpenWakeWord if using it
+        if ww_framework == "openwakeword" and hasattr(self.wake, 'start'):
+            self.wake.start()
         self.whisper = None
         self.hailo = None
-        if self.question_engine in ("whisper", "hailo"):
+        if self.question_engine in ("whisper", "hailo", "whisper-http"):
             # CPU Whisper is ALWAYS loaded in hybrid modes: it is the
             # wake-word judge (Vosk can't reliably hear 'buddy'), and the
             # automatic fallback when Hailo is absent or fails.
-            self.whisper = WhisperSTT(
-                model_size=stt_cfg.get("whisper_model", "base.en"),
-                cpu_threads=stt_cfg.get("whisper_threads", 4)
-            )
+            if self.question_engine == "whisper-http":
+                # Use HTTP client - model stays warm in separate process
+                self.whisper = WhisperClient(
+                    server_url=stt_cfg.get("whisper_server_url", "http://127.0.0.1:8765"),
+                    timeout=stt_cfg.get("whisper_timeout", 30.0),
+                )
+            else:
+                # Direct model loading (original behavior)
+                self.whisper = WhisperSTT(
+                    model_size=stt_cfg.get("whisper_model", "base.en"),
+                    cpu_threads=stt_cfg.get("whisper_threads", 4),
+                    initial_prompt=stt_cfg.get("whisper_prompt", ""),
+                )
             self.wake.whisper = self.whisper
             if self.question_engine == "hailo":
                 try:
@@ -104,7 +142,42 @@ class STEMBuddy:
                 except Exception as e:
                     print(f"⚠ Hailo STT unavailable ({e}) - "
                           f"using CPU Whisper instead")
-        self.tts = TextToSpeech()
+        # Speaker lock: after "buddy", keep only the voice that said it in
+        # the question window; background voices (TV, other kids) are
+        # zeroed out before STT. Contaminated references fall back to the
+        # original audio, so it degrades to today's behavior at worst.
+        self.spk_filter = None
+        spk_cfg = stt_cfg.get("speaker_lock", {})
+        if spk_cfg.get("enabled", True) and self.question_engine in ("whisper", "hailo"):
+            try:
+                from speaker_filter import SpeakerFilter
+                model_path = Path(spk_cfg.get("model", "models/spk/campplus_en.onnx"))
+                if not model_path.is_absolute():
+                    model_path = Path(__file__).parent.parent / model_path
+                self.spk_filter = SpeakerFilter(
+                    str(model_path),
+                    threshold=spk_cfg.get("threshold", 0.75),
+                    min_keep=spk_cfg.get("min_keep", 0.25),
+                    num_threads=spk_cfg.get("threads", 4))
+                console.print(f"[green]✓ Speaker lock on (same-speaker ≥ {self.spk_filter.threshold})[/green]")
+            except Exception as e:
+                console.print(f"[yellow]⚠ Speaker lock unavailable ({e})[/yellow]")
+        
+        # Initialize TTS (direct or HTTP mode)
+        tts_cfg = self.config.get("tts", {})
+        tts_mode = tts_cfg.get("mode", "direct").lower()
+        if tts_mode == "http":
+            try:
+                self.tts = TTSClient(
+                    server_url=tts_cfg.get("http_server_url", "http://127.0.0.1:8766"),
+                    timeout=tts_cfg.get("http_timeout", 30.0),
+                )
+                console.print("[green]✓ TTS HTTP client ready[/green]")
+            except Exception as e:
+                console.print(f"[yellow]⚠ TTS server unavailable ({e}) - falling back to direct[/yellow]")
+                self.tts = TextToSpeech()
+        else:
+            self.tts = TextToSpeech()
         self.llm = LocalLLM(
             model_path=llm_cfg.get("model"),
             n_ctx=llm_cfg.get("context_window", 512),
@@ -141,11 +214,27 @@ class STEMBuddy:
 
         self.running = True
 
-        # One persistent microphone stream - always open while running
-        self.stream = sd.InputStream(
-            samplerate=self.wake.sample_rate, channels=1, dtype="float32"
-        )
-        self.stream.start()
+        # One persistent microphone stream - always open while running.
+        # Opened at 48 kHz when noise suppression is on: RNNoise works at
+        # 48k and the wrapper hands 16k back to everything downstream.
+        ns = self.config.get("audio", {}).get("noise_suppression", True)
+        if ns:
+            try:
+                from noise_suppressor import NoiseSuppressedStream
+                self.stream = sd.InputStream(
+                    samplerate=48000, channels=1, dtype="float32"
+                )
+                self.stream.start()
+                self.stream = NoiseSuppressedStream(self.stream)
+                console.print("[green]✓ Noise suppression on (RNNoise)[/green]")
+            except Exception as e:
+                console.print(f"[yellow]⚠ Noise suppression unavailable ({e}) - raw mic[/yellow]")
+                ns = False
+        if not ns:
+            self.stream = sd.InputStream(
+                samplerate=self.wake.sample_rate, channels=1, dtype="float32"
+            )
+            self.stream.start()
         console.print("[green]✓ Microphone live - always listening[/green]")
 
         while self.running:
@@ -162,6 +251,16 @@ class STEMBuddy:
                     # engine; raise it to a comfortable level first.
                     q_audio = self._normalize(q_audio)
                     if self.stt_cfg.get("debug_audio"):
+                        self._save_debug_audio(q_audio, "-raw")
+                    if self.spk_filter is not None:
+                        # Speaker lock: keep only the voice that said
+                        # "buddy"; the rest (TV, other kids) goes to zero.
+                        ref = self.spk_filter.reference(
+                            self.wake.last_wake_audio)
+                        q_audio, spk_info = self.spk_filter.filter(
+                            q_audio, ref)
+                        print(f"  (speaker lock: {spk_info})")
+                    if self.stt_cfg.get("debug_audio"):
                         self._save_debug_audio(q_audio)
                 if not question and self.whisper is not None and q_audio is not None:
                     # Separate-utterance case: wake word was its own sentence,
@@ -169,6 +268,12 @@ class STEMBuddy:
                     question_source = None
                     if self.hailo is not None:
                         h = self._safe_hailo(q_audio)
+                        if h and is_nonspeech(h):
+                            # Hailo heard only music/noise. Whisper would
+                            # just hallucinate on it (measured 5-17s of
+                            # fluent garbage) - same answer, much slower.
+                            print("  (music/noise - not a question)")
+                            continue
                         if h and len(h.split()) >= 2:
                             question = self._strip_wake(h)
                             question_source = "hailo"
@@ -181,7 +286,8 @@ class STEMBuddy:
                     question_source = self.wake.last_source
                 if question and question_source == "hailo" \
                         and self.whisper is not None and q_audio is not None \
-                        and len(q_audio) < 3.5 * 16000:
+                        and (len(q_audio) < 3.5 * 16000
+                             or is_nonspeech(question)):
                     # Short-window re-judge: the Hailo 5s model is
                     # out-of-distribution on <~3s of speech and garbles it
                     # ("black holes" -> "black horse"). CPU Whisper handles
@@ -199,7 +305,7 @@ class STEMBuddy:
                 if not question:
                     continue
 
-                question = question.strip()
+                question = strip_markers(question).strip()
                 console.print(f"[blue]You said: {question}[/blue]")
 
                 self._process_question(question)
@@ -284,12 +390,12 @@ class STEMBuddy:
             self.wake.hailo = None
             return ""
 
-    def _save_debug_audio(self, audio: np.ndarray):
+    def _save_debug_audio(self, audio: np.ndarray, suffix: str = ""):
         """Save the captured question WAV for debugging (stt.debug_audio: true)."""
         try:
             import wave
             path = Path(__file__).parent.parent / "logs" / "audio" / \
-                f"q-{time.strftime('%Y%m%d-%H%M%S')}.wav"
+                f"q-{time.strftime('%Y%m%d-%H%M%S')}{suffix}.wav"
             path.parent.mkdir(parents=True, exist_ok=True)
             pcm = (np.clip(audio, -1.0, 1.0) * 32767).astype(np.int16)
             with wave.open(str(path), "wb") as w:
@@ -362,6 +468,10 @@ class STEMBuddy:
         play them in order. The first sentence starts playing while the LLM
         is still generating later ones - lower perceived latency.
 
+        The readback ("I heard you say: ...") is enqueued first, so it plays
+        while the LLM is still thinking - instant confirmation of what was
+        heard, and the answer follows right after.
+
         A mic-watcher thread listens for 'STOP' during playback and is
         guaranteed to be stopped before this returns (so it never lingers
         on the microphone and conflicts with the next listening cycle).
@@ -369,6 +479,13 @@ class STEMBuddy:
         import queue
 
         ready = queue.Queue()
+
+        rb = self._readback_text(question)
+        if rb:
+            console.print(f"[dim]↺ {rb}[/dim]")
+            rb_wav = self.tts.synthesize(rb)
+            if rb_wav:
+                ready.put(rb_wav)
 
         def worker():
             for sent in self.llm.query_with_rag_streaming(
@@ -419,6 +536,17 @@ class STEMBuddy:
                     Path(leftover).unlink(missing_ok=True)
             except Exception:
                 break
+
+    @staticmethod
+    def _readback_text(question: str) -> str:
+        """Readback line spoken before the answer. '' if there's nothing
+        sensible to repeat (e.g. Whisper non-speech markers in the text)."""
+        q = question.strip()
+        if not q or "(" in q:
+            return ""
+        if not q.endswith((".", "!", "?")):
+            q += "."
+        return f"I heard you say: {q} My answer is:"
 
     def _simplify_for_kids(self, text: str) -> str:
         """Keep answers short and friendly."""

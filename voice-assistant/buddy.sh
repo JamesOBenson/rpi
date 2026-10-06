@@ -7,6 +7,31 @@ SERVICE="stem-buddy.service"
 
 cmd="${1:-status}"
 
+# Helper: Start HTTP servers if configured
+_start_http_servers() {
+    # Check if Whisper HTTP server should run
+    if grep -q 'question_engine: "whisper-http"' config/settings.yaml 2>/dev/null; then
+        if ! pgrep -f "whisper_server.py" > /dev/null; then
+            echo "▶ Starting Whisper server..."
+            python3 src/whisper_server.py --model small.en --port 8765 &
+            sleep 2
+        else
+            echo "✓ Whisper server already running"
+        fi
+    fi
+    
+    # Check if TTS HTTP server should run
+    if grep -q 'mode: "http"' config/settings.yaml 2>/dev/null; then
+        if ! pgrep -f "tts_server.py" > /dev/null; then
+            echo "▶ Starting TTS server..."
+            python3 src/tts_server.py --voice en_US-amy-medium --port 8766 &
+            sleep 2
+        else
+            echo "✓ TTS server already running"
+        fi
+    fi
+}
+
 need_root() {
     if [ "$(id -u)" -ne 0 ]; then
         sudo "$@"
@@ -17,6 +42,8 @@ need_root() {
 
 case "$cmd" in
     start)
+        # Start HTTP servers if configured
+        _start_http_servers
         need_root systemctl start "$SERVICE"
         echo "▶ STEM Buddy started. Watch logs with: ./buddy.sh logs"
         ;;
@@ -75,11 +102,30 @@ EOF
         fi
         need_root systemctl daemon-reload
         need_root systemctl enable "$SERVICE"
+        
+        # Start HTTP servers
+        _start_http_servers
+        
         need_root systemctl start "$SERVICE"
         echo "✓ STEM Buddy installed, enabled at boot, and started."
         ;;
+    servers)
+        # Manage HTTP servers only
+        _start_http_servers
+        echo ""
+        echo "HTTP server status:"
+        pgrep -f "whisper_server.py" > /dev/null && echo "  ✓ Whisper server running" || echo "  ✗ Whisper server NOT running"
+        pgrep -f "tts_server.py" > /dev/null && echo "  ✓ TTS server running" || echo "  ✗ TTS server NOT running"
+        ;;
     *)
-        echo "Usage: $0 {start|stop|restart|status|logs|logs-tail|enable|disable|install}"
+        echo "Usage: $0 {start|stop|restart|status|logs|logs-tail|enable|disable|install|servers}"
+        echo ""
+        echo "Commands:"
+        echo "  start    - Start HTTP servers + STEM Buddy service"
+        echo "  stop     - Stop STEM Buddy service"
+        echo "  servers  - Start/stop HTTP servers only"
+        echo "  status   - Show service status"
+        echo "  logs     - Follow logs"
         exit 1
         ;;
 esac

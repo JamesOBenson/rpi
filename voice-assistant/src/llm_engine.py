@@ -132,7 +132,7 @@ If you don't know, say "I'm not sure about that one!"""
         
         # Generate answer
         if self.llama:
-            answer = self._generate(prompt)
+            answer = self._generate(prompt, question, context)
         else:
             answer = self._fallback_answer(question, context)
             
@@ -262,24 +262,80 @@ If you don't know, say "I'm not sure about that one!"""
         if self._is_qwen:
             return ["\n\nQ:", "\n\nQuestion:", "Question:", "###"]
         return ["<end_of_turn>", "<start_of_turn>"]
+    
+    def _validate_answer(self, answer: str, question: str, context: List[Dict]) -> bool:
+        """
+        Validate answer quality before returning.
         
-    def _generate(self, prompt: str) -> str:
-        """Generate response from LLM."""
+        Checks:
+        - Has substantive content (not just "I don't know")
+        - Reasonable length (5-60 words)
+        - Some keyword overlap with question or facts
+        
+        Returns True if answer passes validation.
+        """
+        import re
+        
+        # 1. Must have content (not a shrug)
+        shrugs = ["i'm not sure", "i don't know", "i'm still learning", 
+                  "that's a great question", "let me think"]
+        if answer.lower().strip() in shrugs:
+            return False
+        
+        # 2. Must be reasonable length
+        words = answer.split()
+        if len(words) < 3 or len(words) > 60:
+            return False
+        
+        # 3. Should have some relevance to question or facts
+        q_words = set(w for w in re.findall(r"\b[a-z]{4,}\b", question.lower()))
+        a_words = set(w for w in re.findall(r"\b[a-z]{4,}\b", answer.lower()))
+        
+        # Check question overlap
+        if q_words and (q_words & a_words):
+            return True
+        
+        # Check facts overlap if context available
+        if context:
+            fact_words = set()
+            for c in context[:2]:
+                fact_words.update(re.findall(r"\b[a-z]{4,}\b", c["text"].lower()))
+            if fact_words and (fact_words & a_words):
+                return True
+        
+        # 4. At least has some substance
+        content_words = [w for w in a_words if w not in _STOP_WORDS]
+        return len(content_words) >= 3
+    
+    def _generate(self, prompt: str, question: str = "", context: List[Dict] = None) -> str:
+        """Generate response from LLM with validation and retry."""
         try:
-            output = self.llama(
-                prompt,
-                max_tokens=60,
-                temperature=0.3,
-                stop=self._stop_tokens(),
-                echo=False
-            )
+            # Try up to 2 times with different temperatures
+            for temp in [0.3, 0.5]:
+                output = self.llama(
+                    prompt,
+                    max_tokens=60,
+                    temperature=temp,
+                    stop=self._stop_tokens(),
+                    echo=False
+                )
+                
+                answer = output["choices"][0]["text"].strip()
+                answer = self._clean_answer(answer)
+                
+                # Validate before returning
+                if context is None:
+                    context = []
+                if self._validate_answer(answer, question, context):
+                    return answer
+                print(f"  (answer validation failed, retrying...)")
             
-            answer = output["choices"][0]["text"].strip()
-            return self._clean_answer(answer)
+            # All retries failed, return best effort
+            return answer
             
         except Exception as e:
             print(f"Generation error: {e}")
-            return self._fallback_answer("error", [])
+            return self._fallback_answer(question or "error", context or [])
             
     def _clean_answer(self, text: str) -> str:
         """Remove LLM artifacts and enforce short kid-friendly length."""

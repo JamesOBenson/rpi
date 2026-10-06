@@ -14,11 +14,19 @@ soundfile>=0.12.1
 # Speech-to-Text (Offline)
 #   vosk           - always-on wake word (small model, streams in real time)
 #   faster-whisper - question transcription in hybrid mode (CPU, int8)
+#   openwakeword   - lightweight wake word detection (low CPU, multiple wake words)
+#   pvporcupine    - dedicated wake-word spotter (framework: "porcupine")
 vosk>=0.3.45
 faster-whisper>=1.0.0
+openwakeword>=0.4.0
+pvporcupine>=4.0.0
 # Hailo-8L question engine: tokenizer for the model-zoo Whisper HEFs.
 # (Only used when stt.question_engine = "hailo"; CPU path ignores it.)
 transformers>=4.40.0
+
+# Speaker-lock filter: CAM++ speaker embeddings (models/spk/campplus_en.onnx).
+# Keeps only the voice that said the wake word in the question window.
+sherpa-onnx>=1.13.0
 
 # Text-to-Speech (Offline)
 piper-tts>=1.2.0

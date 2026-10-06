@@ -16,6 +16,7 @@ STEM Buddy is a **completely offline** voice assistant designed to spark curiosi
 - ✅ **Voice activation** - Say "Hey Buddy" to start
 - ✅ **100% offline** - No internet required after setup
 - ✅ **Kid-friendly** - Simple, exciting answers
+- ✅ **Noise suppression** - RNNoise on the mic kills fan/AC/background noise
 - ✅ **Safety interrupt** - Physical button or say "STOP!"
 - ✅ **LED feedback** - Visual states (listening, thinking, speaking)
 - ✅ **Wikipedia knowledge** - Curated STEM facts
@@ -81,15 +82,15 @@ it can't find them.
 
 ---
 
-### ⚡ Performance (measured on Raspberry Pi 5 + Hailo-8L)
+### ⚡ Performance (measured on Raspberry Pi 5)
 
 | Stage | Time |
 |-------|------|
-| Model load (startup) | ~9 sec |
+| Model load (startup) | ~8 sec (LLM 3 sec) |
 | Wake word + STT (Hailo) | ~0.8 sec |
 | RAG retrieval | ~0.3 sec |
-| LLM answer (Gemma 3n E2B, first sentence) | ~2.5 sec |
-| **Total: end-of-speech → first audio** | **~3.8 sec** |
+| LLM answer (Qwen3-0.6B, first sentence) | ~1.5-2 sec |
+| **Total: end-of-speech → first audio** | **~2.5-3 sec** |
 
 The STT stage runs Whisper on the **Hailo-8L** (~0.8s) instead of CPU
 (~1.8s). If the Hailo is absent, fails to load, or returns a transcript
@@ -97,8 +98,44 @@ without the wake word, it transparently falls back to CPU Whisper — the
 service still works, just ~1s slower. Set `stt.question_engine: "whisper"`
 in `config/settings.yaml` to skip Hailo entirely.
 
-Switch between Gemma 3n E2B (default) and the Qwen3-1.7B backup via
-`llm.model` in `config/settings.yaml`.
+Switch between Qwen3-0.6B (default) and other models via `llm.model` in
+`config/settings.yaml`. Qwen3-0.6B was picked by benchmark: 2.6x faster
+prefill and 2.7x faster decode than Qwen3-1.7B for answers of equal quality
+on RAG questions (tested 4/4: sky, phishing, rockets, black holes). Since
+RAG supplies the facts, the LLM's only job is synthesizing one sentence — a
+0.6B model does that natively. Keep Qwen3-1.7B as fallback if answers feel
+thin on harder questions.
+
+---
+
+### 📊 LLM Benchmark Results
+
+Tested on Raspberry Pi 5 (8GB RAM), 4 CPU threads, Q4_K_M quantization:
+
+| Model | Released | Size | Prefill | Decode | RAM | Status |
+|-------|----------|------|---------|--------|-----|--------|
+| **Qwen3-0.6B** | Jun 27, 2025 | 0.5GB | **167 t/s** | **24 t/s** | 0.5GB | ✅ Best choice (speed) |
+| Qwen3-1.7B | Apr 28, 2025 | 1.2GB | 63 t/s | 9 t/s | 1.2GB | Fallback (richer on hard questions) |
+| Qwen3.5-2B | Feb 16, 2026 | 1.2GB | 51 t/s | 7.1 t/s | 1.2GB | Good alternative |
+| Gemma-3n-E2B | Jun 26, 2025 | 2.9GB | 32 t/s | 6.1 t/s | 2.9GB | Slower, 2.4x RAM |
+
+**Recommendation**: Qwen3-0.6B is the default - fastest prefill (167 t/s),
+fastest decode (24 t/s), smallest footprint (0.5GB). Answer quality equals
+Qwen3-1.7B on RAG questions (the knowledge base supplies the facts, the LLM
+only synthesizes 1-2 sentences).
+
+**Failed models** (unsupported architectures or download issues):
+- Spark-X2.5-1.7B - `spark2_5` architecture (llama.cpp doesn't support)
+- K2-Horizon-1B - `k2-horizon` architecture (llama.cpp doesn't support)
+- LFM2.5-8B-A1B, Ling-3.0-tiny - MoE models, download/network issues
+
+To re-benchmark:
+```bash
+cd ~/voice-assistant
+sudo systemctl stop stem-buddy.service
+venv/bin/python scripts/bench_model_tps.py models/Qwen3-1.7B-Q4_K_M.gguf
+sudo systemctl start stem-buddy.service
+```
 
 ---
 
@@ -131,8 +168,8 @@ cd ~/voice-assistant
 
 ```
 Pi boots → systemd starts stem-buddy.service (after ~3s)
-         → loads Vosk endpointer, Hailo/CPU Whisper STT, Piper TTS, Gemma 3n LLM, knowledge base
-         → ~20 seconds later: "Listening... (say 'Buddy' or just ask)"
+         → loads Vosk endpointer, Hailo/CPU Whisper STT, Piper TTS, Qwen3 LLM, knowledge base
+         → ~8 seconds later: "Listening... (say 'Buddy' or just ask)"
 ```
 
 > **Note:** If you plug in USB mic/speakers, reboot or run `./buddy.sh restart`
@@ -179,7 +216,7 @@ voice-assistant/
 │   ├── hailo_whisper_engine.py # Question STT on Hailo-8L (optional)
 │   ├── whisper_engine.py    # CPU Whisper (wake-word judge + Hailo fallback)
 │   ├── tts_engine.py        # Text-to-speech (Piper)
-│   ├── llm_engine.py        # Local LLM (Gemma 3n E2B / Qwen3)
+│   ├── llm_engine.py        # Local LLM (Qwen3 / Gemma 3n)
 │   ├── knowledge_base.py    # RAG with ChromaDB
 │   ├── audio_listener.py    # Audio capture
 │   ├── interrupt_handler.py # Button + voice interrupt
@@ -206,6 +243,23 @@ button_pin: 4      # GPIO pin for interrupt button
 led_pin: 17        # GPIO pin for LED
 voice_speed: 1.0   # Speech speed (0.5 to 2.0)
 ```
+
+### Wake word
+
+`wake_word.framework` chooses who detects "buddy":
+
+| framework | How it works | Notes |
+|-----------|--------------|-------|
+| `vosk` (default) | Grammar-constrained Vosk recognizer: can only output the wake word or nothing | Free, offline, no key. Idle audio is never transcribed. |
+| `whisper` | Whisper transcribes every utterance and judges the wake word | Robust but slow (5-36s per TV sentence on CPU). |
+| `porcupine` | Picovoice dedicated keyword spotter | **Free tier ended 2026-06-30** - enterprise AccessKey only (console.picovoice.ai). |
+
+Tuning (`vosk`): `wake_word.wake_confidence` (default 0.3). Raise to 0.5+
+if TV false-triggers; lower to 0.15 if it misses you.
+
+If TV still causes false wakes, the upgrade path is **openWakeWord**
+(offline, MIT, no key): train a custom "buddy" model once (free, ~1-2h:
+Synthetic clips via Piper + openWakeWord's training notebook).
 
 ### GPIO Wiring
 
@@ -255,7 +309,7 @@ Space, animals, physics, inventions, nature
 Question → Vector Search (ChromaDB) → Top 3 Facts → LLM → Kid-Friendly Answer
 ```
 
-When the LLM (Gemma 3n E2B or Qwen3-1.7B) is installed, it synthesizes the retrieved facts into a
+When the LLM (Qwen3-0.6B, or Qwen3-1.7B / Gemma 3n E2B) is installed, it synthesizes the retrieved facts into a
 natural answer. Without it, the best matching fact is spoken directly -
 still fast and accurate!
 
@@ -265,13 +319,13 @@ still fast and accurate!
 Mic → Wake Word → STT → RAG + LLM → TTS → Speakers
        │           │        │            │
    "Buddy"    Hailo/Whisper ChromaDB    Piper
-   (always-on) (Whisper judges) (1058 facts) (Gemma 3n E2B)
+   (always-on) (Whisper judges) (1058 facts) (Qwen3-0.6B)
 ```
 
 1. **Wake Word** - Always-on. Small Vosk model endpoints "someone spoke"; Whisper (CPU) judges whether it said "Buddy"
 2. **STT** - Transcribes the question. **Hailo-8L Whisper** (~0.8s) when a Hailo is installed, CPU Whisper otherwise
 3. **RAG** - Retrieves relevant facts (ChromaDB vector search)
-4. **LLM** - Generates kid-friendly answer (Gemma 3n E2B, streamed; Qwen3-1.7B is the one-line backup)
+4. **LLM** - Generates kid-friendly answer (Qwen3-0.6B, streamed; Qwen3-1.7B or Gemma 3n E2B as backup)
 5. **TTS** - Converts answer to speech (Piper, streamed sentence by sentence)
 
 ---

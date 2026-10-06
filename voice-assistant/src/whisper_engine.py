@@ -32,6 +32,7 @@ class WhisperSTT:
         device: str = "cpu",
         compute_type: str = "int8",
         cpu_threads: int = 4,
+        initial_prompt: str = "",
     ):
         try:
             from faster_whisper import WhisperModel
@@ -40,6 +41,7 @@ class WhisperSTT:
             raise
 
         self.model_size = model_size
+        self.initial_prompt = initial_prompt
         print(f"Loading Whisper model ({model_size}, {compute_type}, {cpu_threads} threads)...")
         t0 = time.time()
         # First run downloads the model from HuggingFace (~460MB for
@@ -62,12 +64,19 @@ class WhisperSTT:
         if audio is None or len(audio) < SAMPLE_RATE // 10:
             return ""
         t0 = time.time()
+        kwargs = {}
+        if self.initial_prompt:
+            # Domain vocabulary bias: measurably fixes rare terms in this
+            # app's fact base ("phishing" was consistently mangled as
+            # "fishing" without it; A/B on real captures).
+            kwargs["initial_prompt"] = self.initial_prompt
         segments, _info = self.model.transcribe(
             audio,
             language="en",
             beam_size=1,  # greedy: ~2x faster than beam=5, negligible loss
             vad_filter=True,  # built-in Silero VAD trims silence
             vad_parameters={"min_silence_duration_ms": 300},
+            **kwargs,
         )
         text = " ".join(seg.text.strip() for seg in segments).strip()
         n_sec = len(audio) / SAMPLE_RATE

@@ -17,8 +17,18 @@ audio:
   silence_duration: 1.5
 
 wake_word:
+  # Wake word detection framework:
+  #   openwakeword = Lightweight, multiple wake words, ~2-5% CPU (RECOMMENDED)
+  #                  Install: pip install openwakeword
+  #   vosk         = Vosk grammar-constrained (fallback if openwakeword fails)
+  framework: "openwakeword"
+  # OpenWakeWord settings
+  wake_words: "buddy,hey_jarvis"  # comma-separated list
+  threshold: 0.5  # 0.0-1.0, higher = less false positives
+  cooldown: 1.5   # seconds between triggers
+  # Vosk settings (fallback)
   sensitivity: 0.6
-  framework: "fallback"  # "porcupine" or "fallback"
+  wake_confidence: 0.3
 
 stt:
   engine: "vosk"
@@ -30,14 +40,14 @@ stt:
   # Vosk-only wake detection.
   model_size: "small"
   # Question engine:
-  #   hailo   = Hailo-8L Whisper base (5s windows). ~0.6s vs ~1.8s for CPU.
-  #             CPU Whisper stays loaded as wake-word judge + automatic
-  #             fallback (if Hailo is absent, fails to load, or returns a
-  #             transcript without the wake word, CPU Whisper re-runs).
-  #             Accuracy on 13 real captures: 12/13 usable, 1 needed the
-  #             CPU fallback (caught by the wake-word check).
-  #   whisper = CPU-only (faster-whisper), most robust, ~1.8s per question
-  question_engine: "hailo"
+  #   whisper     = CPU Whisper (faster-whisper), most robust, ~1.8s per question
+  #   whisper-http = HTTP client to separate Whisper server (model stays warm)
+  #                  Start server first: python3 whisper_server.py --model small.en
+  #   hailo       = Hailo-8L Whisper base (~0.6s), CPU Whisper fallback
+  question_engine: "whisper-http"
+  # HTTP server URL (for question_engine: "whisper-http")
+  whisper_server_url: "http://127.0.0.1:8765"
+  whisper_timeout: 30.0
   # Hailo model assets (HEFs + weights, from the Hailo model zoo, H8L):
   #   models/hailo-whisper/base-whisper-encoder-5s_h8l.hef
   #   models/hailo-whisper/base-whisper-decoder-fixed-sequence-matmul-split_h8l.hef
@@ -71,7 +81,16 @@ llm:
 
 tts:
   engine: "piper"
-  voice: "en_US-lessac-medium"
+  # TTS mode:
+  #   direct    = Load Piper directly in main.py (original behavior)
+  #   http      = Use separate TTS server (keeps model warm, isolated crashes)
+  mode: "http"
+  # HTTP server settings (mode: "http")
+  http_server_url: "http://127.0.0.1:8766"
+  http_timeout: 30.0
+  # Voice model (Piper voices from https://rhasspy.github.io/piper/)
+  # en_US-amy-medium = natural female voice, medium quality
+  voice: "en_US-amy-medium"
   output_format: "wav"
   pitch: 1.0
 
