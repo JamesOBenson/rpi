@@ -210,25 +210,28 @@ Say: **"Hey Buddy!"** (or clap loudly for demo mode)
 ```
 voice-assistant/
 ├── src/
-│   ├── main.py              # Main orchestrator
-│   ├── wake_word.py         # Wake word detection
-│   ├── stt_engine.py        # Wake word + endpointing (Vosk), question routing
+│   ├── main.py                # Main orchestrator
+│   ├── stt_engine.py          # Wake word (Vosk grammar) + sox question endpoint
+│   ├── noise_suppressor.py    # RNNoise mic processing
+│   ├── speaker_filter.py      # Same-speaker voice filter (campplus)
+│   ├── openwakeword_listener.py # Optional openWakeWord wake detection
+│   ├── whisper_engine.py      # In-process faster-whisper STT (question engine)
+│   ├── whisper_client.py      # whisper-http STT client (optional mode)
+│   ├── whisper_server.py      # whisper-http STT server (optional mode)
 │   ├── hailo_whisper_engine.py # Question STT on Hailo-8L (optional)
-│   ├── whisper_engine.py    # CPU Whisper (wake-word judge + Hailo fallback)
-│   ├── tts_engine.py        # Text-to-speech (Piper)
-│   ├── llm_engine.py        # Local LLM (Qwen3 / Gemma 3n)
-│   ├── knowledge_base.py    # RAG with ChromaDB
-│   ├── audio_listener.py    # Audio capture
-│   ├── interrupt_handler.py # Button + voice interrupt
-│   └── led_controller.py    # LED feedback
+│   ├── tts_engine.py          # TTS (Piper, in-process)
+│   ├── tts_client.py / tts_server.py # TTS http mode (optional)
+│   ├── llm_engine.py          # Local LLM (Gemma 3n / Qwen3 via llama.cpp)
+│   ├── knowledge_base.py      # RAG with ChromaDB
+│   ├── interrupt_handler.py   # Button + voice interrupt
+│   └── led_controller.py      # LED feedback (GPIO optional)
 ├── config/
-│   └── settings.yaml        # Configuration
-├── models/                  # Downloaded AI models
-├── data/                    # Knowledge base storage
-├── logs/                    # Application logs
-├── requirements.txt         # Python dependencies
-├── setup.sh                # Setup script
-└── README.md               # This file
+│   └── settings.yaml          # Configuration (source of truth)
+├── models/                    # Downloaded AI models (not in git)
+├── data/                      # Knowledge base + debug captures
+├── scripts/                   # Benchmarks, model downloads, RNNoise build
+├── requirements.txt           # Python dependencies
+└── README.md                  # This file
 ```
 
 ---
@@ -253,6 +256,7 @@ voice_speed: 1.0   # Speech speed (0.5 to 2.0)
 | `vosk` (default) | Grammar-constrained Vosk recognizer: can only output the wake word or nothing | Free, offline, no key. Idle audio is never transcribed. |
 | `whisper` | Whisper transcribes every utterance and judges the wake word | Robust but slow (5-36s per sentence on CPU). |
 | `porcupine` | Picovoice dedicated keyword spotter | **Free tier ended 2026-06-30** - enterprise AccessKey only (console.picovoice.ai). |
+| `openwakeword` | Offline wake-word library, multiple wake words at once | Requires `pip install openwakeword`; built-in models: buddy, hey_jarvis, computer, alexa, more at github.com/dscripka/openWakeWord |
 
 Tuning (`vosk`): `wake_word.wake_confidence` (default 0.3). Raise to 0.5+
 if background audio false-triggers; lower to 0.15 if it misses you.
@@ -262,6 +266,11 @@ If background audio still causes false wakes, the upgrade path is **openWakeWord
 Synthetic clips via Piper + openWakeWord's training notebook).
 
 ### GPIO Wiring
+
+GPIO is entirely optional. With nothing wired (or a Hailo HAT covering the
+pins) everything still works: LED feedback falls back to console colors and
+the interrupt button to voice ("STOP!", also "cut it" / "enough"). Set
+`gpio.enabled: false` in `config/settings.yaml`.
 
 ```
 ┌─────────────┐

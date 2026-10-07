@@ -1,104 +1,64 @@
 # Deploy to Raspberry Pi 5
 
-## Transfer Project to RPi
+The reference deployment: **Pi 5 (8GB)**, user `rpi`, project at
+`~/voice-assistant/`, service unit `stem-buddy.service`.
+
+## From the Mac (day-to-day updates)
+
+The Mac checkout is `~/Documents/GitHub/rpi/voice-assistant`.
 
 ```bash
-# From your Mac, copy to RPi
-scp -r ~/voice-assistant pi@<RPI_IP_ADDRESS>:~/voice-assistant
+cd ~/Documents/GitHub/rpi/voice-assistant
 
-# Or use rsync for better transfer
-rsync -avz --progress ~/voice-assistant/ pi@<RPI_IP_ADDRESS>:~/voice-assistant/
+# Code changes
+rsync -az src/ rpi:~/voice-assistant/src/
+
+# Config changes (repo config is the source of truth)
+rsync -az config/settings.yaml rpi:~/voice-assistant/config/
+
+# Restart
+ssh rpi 'sudo systemctl restart stem-buddy.service'
+ssh rpi 'journalctl -u stem-buddy --since "1 min ago" --no-pager | tail'
 ```
 
-## On Raspberry Pi
+## Fresh install (on the Pi)
 
 ```bash
-# SSH into RPi
-ssh pi@<RPI_IP_ADDRESS>
-
-# Navigate to project
 cd ~/voice-assistant
-
-# Set up virtual environment
 python3 -m venv venv
-source venv/bin/activate
-
-# Install dependencies
-pip install --upgrade pip
-pip install -r requirements.txt
-
-# Download models (on RPi)
-./download_models.sh
-
-# Run
-cd src
-python main.py
+venv/bin/pip install -r requirements.txt
+./download_models.sh          # STT + TTS + LLM models (~1-3GB)
+sudo usermod -aG gpio rpi     # only if wiring GPIO pins
+sudo systemctl enable --now stem-buddy.service
 ```
 
-## Hailo-9L Integration (Optional)
+## Notes
+
+- **Question STT runs in-process** (`question_engine: "whisper"`,
+  faster-whisper small.en int8) — no separate whisper server.
+  `whisper-server.service` (whisper.cpp) is stopped and unused.
+- **Piper** binary: `bin/piper/piper` (v1.2.0); voice model
+  `models/en_US-lessac-medium.onnx`.
+- **RNNoise** lib: `lib/librnnoise.so` (rebuild with
+  `scripts/build_rnnoise.sh` if ever missing).
+- If the service won't start, check the venv survived any reorg:
+  `ls venv/bin/python lib/librnnoise.so voices models/spk/campplus_en.onnx`.
+
+## Hailo-8L (optional)
 
 ```bash
-# Install Hailo SDK
-sudo apt install -y hailo-rt
-
-# Enable Hailo acceleration
-# See: https://docs.hailo.ai/
+sudo apt install -y hailo-rt   # SDK
 ```
-
-## Auto-start on Boot
-
-```bash
-# Create systemd service
-sudo nano /etc/systemd/system/stembuddy.service
-```
-
-```ini
-[Unit]
-Description=STEM Buddy Voice Assistant
-After=network.target
-
-[Service]
-Type=simple
-User=pi
-WorkingDirectory=/home/pi/voice-assistant
-ExecStart=/home/pi/voice-assistant/venv/bin/python src/main.py
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
-# Enable service
-sudo systemctl enable stembuddy.service
-sudo systemctl start stembuddy.service
-```
+Then set `stt.question_engine: "hailo"` — see README (Pipeline) and the
+HEF/weight paths under `models/hailo-whisper/`.
 
 ## Troubleshooting
 
-### Audio Issues
 ```bash
-# Check audio devices
-arecord -l
-aplay -l
-
-# Set default device
-sudo nano /usr/share/alsa/alsa.conf
+arecord -l            # mic present?
+aplay -l              # speaker present?
+ls -lh models/        # models present?
+journalctl -u stem-buddy -n 50
 ```
 
-### GPIO Permissions
-```bash
-# Add user to gpio group
-sudo usermod -a -G gpio pi
-sudo usermod -a -G video pi
-# Log out and back in
-```
-
-### Model Loading
-```bash
-# Check models exist
-ls -lh models/
-
-# Verify model integrity
-# Re-download if corrupted
-```
+GPIO permission denied: `sudo usermod -aG gpio rpi`, log out and back in.
