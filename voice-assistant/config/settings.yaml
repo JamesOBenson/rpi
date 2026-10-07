@@ -44,8 +44,9 @@ stt:
   #   whisper-http = HTTP client to separate Whisper server (model stays warm)
   #                  Start server first: python3 whisper_server.py --model small.en
   #   hailo       = Hailo-8L Whisper base (~0.6s), CPU Whisper fallback
-  question_engine: "whisper-http"
-  # HTTP server URL (for question_engine: "whisper-http")
+  question_engine: "whisper"
+  whisper_model: "small.en"  # same model the whisplay-ai-chatbot uses
+  # HTTP server URL (for question_engine: "whisper")
   whisper_server_url: "http://127.0.0.1:8765"
   whisper_timeout: 30.0
   # Hailo model assets (HEFs + weights, from the Hailo model zoo, H8L):
@@ -84,8 +85,8 @@ tts:
   # TTS mode:
   #   direct    = Load Piper directly in main.py (original behavior)
   #   http      = Use separate TTS server (keeps model warm, isolated crashes)
-  mode: "http"
-  # HTTP server settings (mode: "http")
+  mode: "direct"
+  # HTTP server settings (mode: "direct")
   http_server_url: "http://127.0.0.1:8766"
   http_timeout: 30.0
   # Voice settings
