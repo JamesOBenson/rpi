@@ -117,6 +117,9 @@ Tested on Raspberry Pi 5 (8GB RAM), 4 CPU threads, Q4_K_M quantization:
 | Qwen3.5-2B | Feb 16, 2026 | 1.2GB | 51 t/s | 7.1 t/s | 1.2GB | Good alternative |
 | **Gemma-3n-E2B** | Jun 26, 2025 | 2.9GB | 32 t/s | 6.1 t/s | 2.9GB | ✅ Running on the Pi (default) |
 
+*Measured with the service stopped and the Pi near idle temperature; expect
+~20% lower decode rates when the board is hot (it throttles at ~80°C).*
+
 **Running on the Pi**: Gemma 3n E2B — ~2.5 s to first sentence, designed
 for on-device use. Qwen3-0.6B is faster on raw t/s; switch via `llm.model`
 if answers feel slow.
