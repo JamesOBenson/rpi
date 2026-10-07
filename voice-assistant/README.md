@@ -35,7 +35,7 @@ STEM Buddy is a **completely offline** voice assistant designed to spark curiosi
 | Push Button | ⚠️ | For interrupt (can skip) |
 | RGB LED | ⚠️ | Visual feedback (can skip) |
 
-### Total Cost: ~$300-400 (excluding Pi; Hailo-8L is optional)
+### Total Cost: ~$200-300 (excluding Pi; Hailo-8L is optional)
 
 ---
 
