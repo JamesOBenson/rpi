@@ -89,7 +89,7 @@ it can't find them.
 | Model load (startup) | ~8 sec (LLM 3 sec) |
 | Wake word + STT (Hailo / CPU) | ~0.8 / ~1.8 sec |
 | RAG retrieval | ~0.3 sec |
-| LLM answer (Qwen3-0.6B, first sentence) | ~1.5-2 sec |
+| LLM answer (Gemma 3n E2B, first sentence) | ~2-2.5 sec |
 | **Total: end-of-speech → first audio** | **~2.5-3 sec** |
 
 The STT stage runs Whisper on the **Hailo-8L** (~0.8s) when the chip is
@@ -99,13 +99,10 @@ installed; otherwise it uses in-process **faster-whisper** on CPU (~1.8s).
 faster-whisper — what the Pi ships with), or `"whisper-http"` (separate
 warm server process, see WHISPER_HTTP.md).
 
-Switch between Qwen3-0.6B (default) and other models via `llm.model` in
-`config/settings.yaml`. Qwen3-0.6B was picked by benchmark: 2.6x faster
-prefill and 2.7x faster decode than Qwen3-1.7B for answers of equal quality
-on RAG questions (tested 4/4: sky, phishing, rockets, black holes). Since
-RAG supplies the facts, the LLM's only job is synthesizing one sentence — a
-0.6B model does that natively. Keep Qwen3-1.7B as fallback if answers feel
-thin on harder questions.
+The Pi runs **Gemma 3n E2B** (Q4_K_M). Switch models via `llm.model` in
+`config/settings.yaml` — the benchmarks below compare the candidates.
+Since RAG supplies the facts, the LLM's only job is synthesizing one
+sentence, so a small model suffices.
 
 ---
 
@@ -115,15 +112,14 @@ Tested on Raspberry Pi 5 (8GB RAM), 4 CPU threads, Q4_K_M quantization:
 
 | Model | Released | Size | Prefill | Decode | RAM | Status |
 |-------|----------|------|---------|--------|-----|--------|
-| **Qwen3-0.6B** | Jun 27, 2025 | 0.5GB | **167 t/s** | **24 t/s** | 0.5GB | ✅ Best choice (speed) |
+| **Qwen3-0.6B** | Jun 27, 2025 | 0.5GB | **167 t/s** | **24 t/s** | 0.5GB | Fastest raw speed |
 | Qwen3-1.7B | Apr 28, 2025 | 1.2GB | 63 t/s | 9 t/s | 1.2GB | Fallback (richer on hard questions) |
 | Qwen3.5-2B | Feb 16, 2026 | 1.2GB | 51 t/s | 7.1 t/s | 1.2GB | Good alternative |
-| Gemma-3n-E2B | Jun 26, 2025 | 2.9GB | 32 t/s | 6.1 t/s | 2.9GB | Slower, 2.4x RAM |
+| **Gemma-3n-E2B** | Jun 26, 2025 | 2.9GB | 32 t/s | 6.1 t/s | 2.9GB | ✅ Running on the Pi (default) |
 
-**Recommendation**: Qwen3-0.6B is the default - fastest prefill (167 t/s),
-fastest decode (24 t/s), smallest footprint (0.5GB). Answer quality equals
-Qwen3-1.7B on RAG questions (the knowledge base supplies the facts, the LLM
-only synthesizes 1-2 sentences).
+**Running on the Pi**: Gemma 3n E2B — ~2.5 s to first sentence, designed
+for on-device use. Qwen3-0.6B is faster on raw t/s; switch via `llm.model`
+if answers feel slow.
 
 **Failed models** (unsupported architectures or download issues):
 - Spark-X2.5-1.7B - `spark2_5` architecture (llama.cpp doesn't support)
@@ -169,7 +165,7 @@ cd ~/voice-assistant
 
 ```
 Pi boots → systemd starts stem-buddy.service (after ~3s)
-         → loads Vosk endpointer, Hailo/CPU Whisper STT, Piper TTS, Qwen3 LLM, knowledge base
+         → loads Vosk endpointer, Hailo/CPU Whisper STT, Piper TTS, Gemma/Qwen3 LLM, knowledge base
          → ~8 seconds later: "Listening... (say 'Buddy' or just ask)"
 ```
 
@@ -252,13 +248,13 @@ voice_speed: 1.0   # Speech speed (0.5 to 2.0)
 | framework | How it works | Notes |
 |-----------|--------------|-------|
 | `vosk` (default) | Grammar-constrained Vosk recognizer: can only output the wake word or nothing | Free, offline, no key. Idle audio is never transcribed. |
-| `whisper` | Whisper transcribes every utterance and judges the wake word | Robust but slow (5-36s per TV sentence on CPU). |
+| `whisper` | Whisper transcribes every utterance and judges the wake word | Robust but slow (5-36s per sentence on CPU). |
 | `porcupine` | Picovoice dedicated keyword spotter | **Free tier ended 2026-06-30** - enterprise AccessKey only (console.picovoice.ai). |
 
 Tuning (`vosk`): `wake_word.wake_confidence` (default 0.3). Raise to 0.5+
-if TV false-triggers; lower to 0.15 if it misses you.
+if background audio false-triggers; lower to 0.15 if it misses you.
 
-If TV still causes false wakes, the upgrade path is **openWakeWord**
+If background audio still causes false wakes, the upgrade path is **openWakeWord**
 (offline, MIT, no key): train a custom "buddy" model once (free, ~1-2h:
 Synthetic clips via Piper + openWakeWord's training notebook).
 
@@ -310,7 +306,7 @@ Space, animals, physics, inventions, nature
 Question → Vector Search (ChromaDB) → Top 3 Facts → LLM → Kid-Friendly Answer
 ```
 
-When the LLM (Qwen3-0.6B, or Qwen3-1.7B / Gemma 3n E2B) is installed, it synthesizes the retrieved facts into a
+When the LLM (Gemma 3n E2B on the Pi, or Qwen3-0.6B / Qwen3-1.7B) is installed, it synthesizes the retrieved facts into a
 natural answer. Without it, the best matching fact is spoken directly -
 still fast and accurate!
 
@@ -325,7 +321,7 @@ Mic → RNNoise → Wake word → Question capture → STT → RAG + LLM → TTS
 3. **Question capture** - sox silence endpoint: starts when you speak, stops 0.7 s after you stop. The threshold (4%) is in `src/stt_engine.py` — retune it for a new room
 4. **STT** - Transcribes the question. In-process **faster-whisper** `small.en` int8 (the Pi default; `stt.whisper_model`), Hailo-8L Whisper when the chip is installed, or a separate HTTP server (WHISPER_HTTP.md)
 5. **RAG** - Retrieves relevant facts (ChromaDB vector search)
-6. **LLM** - Generates kid-friendly answer (streamed; Qwen3-0.6B, Qwen3-1.7B or Gemma 3n E2B via `llm.model`)
+6. **LLM** - Generates kid-friendly answer (streamed; Gemma 3n E2B on the Pi — or Qwen3 via `llm.model`)
 7. **TTS** - Converts answer to speech (Piper, streamed sentence by sentence)
 
 ---
