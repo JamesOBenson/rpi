@@ -374,6 +374,14 @@ the microphone.
 
 ---
 
+## 🙏 Credits
+
+Parts of this project were inspired by the creators of
+[whisplay-ai-chatbot](https://github.com/PiSugar/whisplay-ai-chatbot) —
+notably the separate HTTP server architecture for Whisper/TTS, the sox
+silence-based question endpointing, the faster-whisper `small.en`
+tuning, and the wake-word chime (their sox synth, used verbatim).
+
 ## 📄 License
 
 MIT License - Free to use, modify, and distribute.
