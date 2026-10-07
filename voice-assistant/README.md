@@ -139,6 +139,70 @@ sudo systemctl start stem-buddy.service
 
 ---
 
+## 🐍 Fresh Pi Install (TL;DR)
+
+Flash **Raspberry Pi OS (64-bit, Lite)** onto a **Pi 5 (8GB)**, enable SSH,
+plug in a USB mic + speaker. Then, in order:
+
+```bash
+# 1. System packages (audio, venv, build tools for RNNoise)
+sudo apt update
+sudo apt install -y alsa-utils python3-venv portaudio19-dev build-essential wget
+
+# 2. Code + Python deps (vosk, faster-whisper, piper-tts, openwakeword, ...)
+cd ~
+git clone https://github.com/JamesOBenson/rpi.git && cd rpi/voice-assistant
+python3 -m venv venv
+venv/bin/pip install -r requirements.txt
+
+# 3. Build RNNoise (mic noise suppression, ~1 min)
+./scripts/build_rnnoise.sh
+
+# 4. Models: Vosk wake word, Piper voice, Gemma 3n LLM (~1GB total).
+#    faster-whisper small.en auto-downloads on first run (~500MB).
+./download_models.sh
+```
+
+5. **Config** — `config/settings.yaml` works out of the box for most USB
+   mics (auto-detects the default device). Change only if it picks the wrong
+   one, or to switch the LLM (`llm.model`):
+
+```bash
+arecord -l                     # check your mic is the default device
+```
+
+6. **Service** — write `/etc/systemd/system/stem-buddy.service` (adjust
+   paths/username if you're not `rpi`):
+
+```ini
+[Unit]
+Description=STEM Buddy voice assistant
+After=network.target sound.target
+
+[Service]
+User=rpi
+WorkingDirectory=/home/rpi/voice-assistant
+Environment=PYTHONPATH=/home/rpi/voice-assistant
+ExecStart=/home/rpi/voice-assistant/venv/bin/python src/main.py
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+# 7. Start + verify (~40 s to full startup)
+sudo systemctl daemon-reload
+sudo systemctl enable --now stem-buddy.service
+journalctl -u stem-buddy -f    # good signs: "✓ Whisper STT ready" then [LISTENING]
+```
+
+Wiring the GPIO button/LED? Add your user to the `gpio` group first:
+`sudo usermod -aG gpio $USER` (log out/in). Full details:
+[DEPLOY_TO_RPI.md](DEPLOY_TO_RPI.md).
+
+---
+
 ## ⚡ Autostart at Boot
 
 STEM Buddy runs as a **systemd service** so it starts automatically when the
