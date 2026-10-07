@@ -41,7 +41,10 @@ class TextToSpeech:
             speed: Speech speed multiplier (1.0 = normal)
         """
         if voice_model is None:
-            voice_model = str(PROJECT_ROOT / "models" / "en_US-lessac-medium.onnx")
+            default_voice = PROJECT_ROOT / "models" / "en_US-lessac-medium.onnx"
+            if not default_voice.exists():
+                default_voice = PROJECT_ROOT / "voices" / "en_US-lessac-medium.onnx"
+            voice_model = str(default_voice)
         self.model_path = Path(voice_model)
         self.speed = speed
         self.volume = 1.0

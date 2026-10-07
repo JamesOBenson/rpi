@@ -76,7 +76,8 @@ class LocalLLM:
 Answer in 1-2 short sentences, simple words, under 40 words.
 Start directly - no labels, no names, no "Response:".
 Use the facts below when they answer the question; ignore them otherwise.
-If you don't know, say "I'm not sure about that one!"""
+If you don't know, say you are still learning, in one short friendly
+sentence - never give up on the question."""
         
     def initialize(self):
         """Initialize LLM model."""
@@ -330,8 +331,9 @@ If you don't know, say "I'm not sure about that one!"""
                     return answer
                 print(f"  (answer validation failed, retrying...)")
             
-            # All retries failed, return best effort
-            return answer
+            # All retries failed (shrug/empty/off-topic) - never repeat the
+            # shrug; redirect with the fact-based fallback instead.
+            return self._fallback_answer(question or "that", context)
             
         except Exception as e:
             print(f"Generation error: {e}")

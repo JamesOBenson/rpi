@@ -9,7 +9,10 @@ Fast, accurate, and works completely offline.
 import json
 import os
 import re
+import subprocess
+import tempfile
 import time
+import wave
 from collections import deque
 import numpy as np
 import sounddevice as sd
@@ -277,6 +280,14 @@ class WakeWordListener:
         self.debug_audio = debug_audio
         self._ring = deque(maxlen=120)  # last 12s of 0.1s chunks
         self._cap = []  # audio captured since the wake word
+        self._q_flip = 0.0  # when the current question capture started
+        self._q_silent = 0    # consecutive silent chunks in question state
+        self._q_heard = False  # voiced audio seen since the wake word
+        self._q_wait = False   # bare wake word; waiting for the question
+        self._q_sox = None      # sox endpoint process (question capture)
+        self._q_sox_path = None
+        self._q_sox_start = 0.0
+        self._q_sox_fails = 0
         # Porcupine: dedicated keyword spotter for the wake word. Runs on
         # every idle chunk (32ms frames), costs ~no CPU, and ignores
         # background speech (TV) that Whisper would transcribe for 5-20s.
@@ -407,6 +418,69 @@ class WakeWordListener:
         # < 0.5s after trim = nothing real was said (blip + padding)
         return out if len(out) >= self.sample_rate // 2 else None
 
+    def _read_sox_capture(self) -> Optional[np.ndarray]:
+        """Load and trim the sox question capture (no gain: faster-whisper
+        wants mic-level audio, same as the whisplay-ai-chatbot path -
+        boosting quiet audio just boosts the noise too)."""
+        try:
+            with wave.open(self._q_sox_path, "rb") as w:
+                if w.getnframes() < self.sample_rate // 4:
+                    return None
+                frames = w.readframes(w.getnframes())
+            x = np.frombuffer(frames, dtype=np.int16)
+            return self._trim_silence(x)
+        except Exception:
+            return None
+
+    def _q_sox_kill(self):
+        if self._q_sox is not None:
+            try:
+                self._q_sox.stdin.close()  # EOF: sox flushes and exits
+            except Exception:
+                pass
+            try:
+                self._q_sox.wait(timeout=2.0)
+            except Exception:
+                try:
+                    self._q_sox.kill()
+                except Exception:
+                    pass
+            self._q_sox = None
+            self._q_dbg_flush()
+
+    def _q_dbg_flush(self):
+        """Dump everything fed to sox this question to a wav, for diagnosis."""
+        frames = getattr(self, "_q_dbg", None)
+        if not frames:
+            return
+        try:
+            out = PROJECT_ROOT / "data" / "debug" / "last-question-raw.wav"
+            out.parent.mkdir(parents=True, exist_ok=True)
+            with wave.open(str(out), "wb") as w:
+                w.setnchannels(1)
+                w.setsampwidth(2)
+                w.setframerate(16000)
+                w.writeframes(b"".join(frames))
+        except Exception:
+            pass
+        self._q_dbg = []
+
+    def _play_wake_chime(self):
+        """The whisplay-ai-chatbot wakeup chime, verbatim: sox synth three
+        rising tones (720/980/1320 Hz) at -30 dB straight to ALSA - no
+        file, no aplay. Quiet by design (won't trip the 4% question
+        endpoint via speaker->mic feedback)."""
+        try:
+            subprocess.Popen(
+                ["sox", "-q", "-n", "-t", "alsa", "default",
+                 "synth", "0.10", "sine", "720", "vol", "0.4", ":",
+                 "synth", "0.12", "sine", "980", "vol", "0.35", ":",
+                 "synth", "0.14", "sine", "1320", "vol", "0.3",
+                 "fade", "q", "0.02", "0.30", "0.08", "gain", "-30"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
     def wait_for_question(self, stream):
         """
         Block on an open sounddevice InputStream until the wake word is
@@ -428,6 +502,17 @@ class WakeWordListener:
             pcm = (data.flatten() * 32767).astype(np.int16)
             chunk = pcm.tobytes()
             now = time.time()
+
+            # Timeout: heard 'buddy' but no question. Checked every chunk -
+            # at the loop bottom it was unreachable while rec stayed silent.
+            if state == "question" and (now - state_start) > self.question_timeout:
+                print("  (no question heard - back to listening for 'Buddy')")
+                self._q_sox_kill()
+                state = "idle"
+                state_start = now
+                self._q_silent, self._q_heard, self._q_wait = 0, False, False
+                if self.hybrid:
+                    self._cap = []
 
             if self.hybrid:
                 self._ring.append(pcm)
@@ -451,8 +536,10 @@ class WakeWordListener:
                         self.last_wake_audio = (tail / 32768.0
                                                 ).astype(np.float32)
                         print("  \u2713 Wake word! Say your question")
+                        self._play_wake_chime()
                         state = "question"
                         state_start = now
+                        self._q_flip = now
                         self._cap = []
                         break
 
@@ -475,10 +562,96 @@ class WakeWordListener:
                                 self.last_wake_audio = (tail / 32768.0
                                                         ).astype(np.float32)
                                 self._cap = []
-                            print(f"  \u2713 Wake word! (conf {conf:.2f}) "
-                                  f"Say your question")
+                            print(f"  \u2713 Wake word! (conf {conf:.2f} "
+                                  f"heard {text!r}) Say your question")
+                            self._play_wake_chime()
                             state = "question"
                             state_start = now
+                            self._q_flip = now
+                            self._q_silent, self._q_heard, self._q_wait = \
+                                0, False, False
+                            self._q_sox_kill()
+                            self._q_sox_fails = 0
+
+            if self.hybrid and self.wake_rec is not None and state == "question":
+                # sox endpoint (ported from whisplay-ai-chatbot, which the
+                # user A/B-tested as "hears everything perfectly"): sox
+                # exits 0.7s after the signal drops below the threshold.
+                # 4% is tuned for the current room (measured 2024-10-07):
+                # noise floor peaks 1-1.3%, voice peaks 7.6-14.8% - the
+                # original 24% (chatbot room) and 10% both missed the
+                # user's normal speech here. A 0.7s-sustained drop is
+                # required to stop, so brief noise spikes above 4% at
+                # most cost 0.7s, never an endpoint mid-question.
+                # The stream keeps feeding the ring while sox records, so a
+                # short capture (noise blip, or a one-breath question sox
+                # clipped at startup) falls back to the ring audio.
+                if self._q_sox is None and self._q_sox_fails < 2:
+                    self._q_sox_path = os.path.join(
+                        tempfile.gettempdir(), "stem-buddy-question.wav")
+                    try:
+                        # sox reads the mic from STDIN - the same stream
+                        # the wake loop already reads. portaudio and sox
+                        # CANNOT both open the ALSA device: with the
+                        # sounddevice stream open, sox on '-t alsa default'
+                        # recorded pure silence (loopback-tone test).
+                        self._q_sox = subprocess.Popen(
+                            ["sox",
+                             "-t", "raw", "-r", "16000", "-c", "1",
+                             "-e", "signed-integer", "-b", "16", "-",
+                             "-t", "wav", "-c", "1", "-r", "16000",
+                             self._q_sox_path,
+                             "silence", "1", "0.1", "4%", "1", "0.7", "4%"],
+                            stdin=subprocess.PIPE,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL)
+                        self._q_sox_start = now
+                        self._q_dbg = []
+                    except Exception as e:
+                        self._q_sox_fails += 1
+                        print(f"  (sox failed to start: {e})")
+                if self._q_sox is not None and self._q_sox.poll() is None:
+                    qbytes = (data.flatten() * 32767).astype(np.int16) \
+                        .tobytes()
+                    try:
+                        self._q_sox.stdin.write(qbytes)
+                        self._q_dbg.append(qbytes)
+                    except Exception:
+                        pass  # sox already ended at its endpoint
+                if self._q_sox is not None and self._q_sox.poll() is not None:
+                    self._q_sox = None
+                    self._q_dbg_flush()
+                    if now - self._q_sox_start < 0.3:
+                        # Exited almost instantly: device busy or sox
+                        # missing, not a real endpoint.
+                        self._q_sox_fails += 1
+                        print("  (sox exited early - capture degraded)")
+                    else:
+                        audio = self._read_sox_capture()
+                        if audio is None or \
+                                len(audio) < 1.5 * self.sample_rate:
+                            # Short capture: a noise blip, or a one-breath
+                            # question sox clipped at startup - the ring
+                            # holds the fuller picture.
+                            window = np.concatenate(
+                                list(self._ring)[-60:])
+                            ring_audio = self._trim_silence(window)
+                            # Ring only rescues real one-breath utterances
+                            # (wake + question, > 1.5s); a bare "buddy" +
+                            # chime blip is not a question.
+                            if ring_audio is not None and \
+                                    len(ring_audio) > 1.5 * self.sample_rate:
+                                audio = ring_audio
+                        if audio is not None:
+                            print(f"  (endpoint: sox, cap="
+                                  f"{len(audio) / self.sample_rate:.1f}s)")
+                            return "", audio
+                        # Nothing usable: noise blip. Re-arm sox on the
+                        # next iteration; the question_timeout above bounds
+                        # the overall wait.
+                if rec.AcceptWaveform(chunk):
+                    rec.Reset()
+                continue
 
             has_final = rec.AcceptWaveform(chunk)
 
@@ -543,6 +716,7 @@ class WakeWordListener:
                         print("  ✓ Buddy! Say your question")
                         state = "question"
                         state_start = now
+                        self._q_flip = now
                         self._cap = []
                     else:
                         # Not addressed to us - show what we heard
@@ -557,6 +731,7 @@ class WakeWordListener:
                     print("  ✓ Buddy! Say your question")
                     state = "question"
                     state_start = now
+                    self._q_flip = now
                     if self.hybrid:
                         self._cap = []
                 elif final.strip() and self.porcupine is None \
@@ -568,25 +743,39 @@ class WakeWordListener:
                     print(f"  (heard: {final!r})")
                     self._save_idle_audio()
             else:  # already heard wake word, waiting for the question
-                if self._meaningful(final):
+                if not self._meaningful(final):
+                    print(f"  (noise final: {final!r} - waiting)")
+                    state_start = now  # was noise, keep waiting
+                elif not self._after_wake(final):
+                    # rec endpointed the wake-word utterance itself
+                    # ("buddy" + filler). The question hasn't started yet:
+                    # restart the capture and keep waiting.
+                    print(f"  (wake-word final: {final!r} - waiting)")
+                    if self.hybrid:
+                        self._cap = []
+                    state_start = now
+                else:
+                    print(f"  (question final: {final!r})")
                     audio = None
-                    if self.hybrid and self._cap:
+                    if self.hybrid and self.wake_rec is not None \
+                            and now - self._q_flip < 2.0:
+                        # rec endpointed the wake-word utterance itself:
+                        # one-breath "buddy <question>" (Vosk mangles the
+                        # wake word in the final, e.g. "buddy tell me a
+                        # joke" -> "but he telling a joke") or a fast
+                        # follow-up. _cap holds only a fragment; the ring
+                        # holds the whole utterance. Whisper gets the full
+                        # audio; main.py strips the wake word from the text.
+                        window = np.concatenate(list(self._ring)[-60:])
+                        audio = self._normalize_for_asr(
+                            self._trim_silence(window))
+                    if audio is None and self.hybrid and self._cap:
                         audio = self._normalize_for_asr(
                             self._trim_silence(np.concatenate(self._cap)))
                     if self.hybrid and audio is not None:
-                        # Return empty text: main.py transcribes the capture
-                        # (the wake word itself isn't in this audio).
+                        # Return empty text: main.py transcribes the capture.
                         return "", audio
                     return final, audio
-                state_start = now  # was noise, keep waiting
-
-            # Timeout: heard 'buddy' but no question
-            if state == "question" and (now - state_start) > self.question_timeout:
-                print("  (no question heard - back to listening for 'Buddy')")
-                state = "idle"
-                state_start = now
-                if self.hybrid:
-                    self._cap = []
 
     def _has_wake(self, text: str) -> bool:
         """True if any wake-word variant appears in the transcript."""

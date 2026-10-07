@@ -87,16 +87,17 @@ it can't find them.
 | Stage | Time |
 |-------|------|
 | Model load (startup) | ~8 sec (LLM 3 sec) |
-| Wake word + STT (Hailo) | ~0.8 sec |
+| Wake word + STT (Hailo / CPU) | ~0.8 / ~1.8 sec |
 | RAG retrieval | ~0.3 sec |
 | LLM answer (Qwen3-0.6B, first sentence) | ~1.5-2 sec |
 | **Total: end-of-speech → first audio** | **~2.5-3 sec** |
 
-The STT stage runs Whisper on the **Hailo-8L** (~0.8s) instead of CPU
-(~1.8s). If the Hailo is absent, fails to load, or returns a transcript
-without the wake word, it transparently falls back to CPU Whisper — the
-service still works, just ~1s slower. Set `stt.question_engine: "whisper"`
-in `config/settings.yaml` to skip Hailo entirely.
+The STT stage runs Whisper on the **Hailo-8L** (~0.8s) when the chip is
+installed; otherwise it uses in-process **faster-whisper** on CPU (~1.8s).
+`stt.question_engine` in `config/settings.yaml` selects the backend:
+`"hailo"` (chip, transparent CPU fallback), `"whisper"` (in-process
+faster-whisper — what the Pi ships with), or `"whisper-http"` (separate
+warm server process, see WHISPER_HTTP.md).
 
 Switch between Qwen3-0.6B (default) and other models via `llm.model` in
 `config/settings.yaml`. Qwen3-0.6B was picked by benchmark: 2.6x faster
@@ -316,17 +317,16 @@ still fast and accurate!
 ### Pipeline
 
 ```
-Mic → Wake Word → STT → RAG + LLM → TTS → Speakers
-       │           │        │            │
-   "Buddy"    Hailo/Whisper ChromaDB    Piper
-   (always-on) (Whisper judges) (1058 facts) (Qwen3-0.6B)
+Mic → RNNoise → Wake word → Question capture → STT → RAG + LLM → TTS → Speakers
 ```
 
-1. **Wake Word** - Always-on. Small Vosk model endpoints "someone spoke"; Whisper (CPU) judges whether it said "Buddy"
-2. **STT** - Transcribes the question. **Hailo-8L Whisper** (~0.8s) when a Hailo is installed, CPU Whisper otherwise
-3. **RAG** - Retrieves relevant facts (ChromaDB vector search)
-4. **LLM** - Generates kid-friendly answer (Qwen3-0.6B, streamed; Qwen3-1.7B or Gemma 3n E2B as backup)
-5. **TTS** - Converts answer to speech (Piper, streamed sentence by sentence)
+1. **Noise suppression** - 48 kHz mic capture, RNNoise suppression (`audio.noise_suppression`)
+2. **Wake word** - Always-on. Vosk small model, grammar-constrained to "Buddy" (conf ≥ 0.3); plays a short chime when it lands
+3. **Question capture** - sox silence endpoint: starts when you speak, stops 0.7 s after you stop. The threshold (4%) is in `src/stt_engine.py` — retune it for a new room
+4. **STT** - Transcribes the question. In-process **faster-whisper** `small.en` int8 (the Pi default; `stt.whisper_model`), Hailo-8L Whisper when the chip is installed, or a separate HTTP server (WHISPER_HTTP.md)
+5. **RAG** - Retrieves relevant facts (ChromaDB vector search)
+6. **LLM** - Generates kid-friendly answer (streamed; Qwen3-0.6B, Qwen3-1.7B or Gemma 3n E2B via `llm.model`)
+7. **TTS** - Converts answer to speech (Piper, streamed sentence by sentence)
 
 ---
 
@@ -365,7 +365,16 @@ Download models manually from URLs in setup instructions.
 ### "Slow responses"
 - Use smaller Vosk model (`vosk-model-small-en-us-0.15`) - already the default
 - Reduce LLM context window in config
-- Use `stt.question_engine: "hailo"` - Whisper on the Hailo-8L chip (default; set to `"whisper"` for CPU-only)
+- Use `stt.question_engine: "hailo"` - Whisper on the Hailo-8L chip; `"whisper"` (in-process faster-whisper) is the CPU path the Pi ships with
+- If it stops hearing you after a move, retune the sox question-capture threshold in `src/stt_engine.py` (4% on the current Pi)
+
+### "It hears the wrong words"
+With `stt.debug_audio: true`, every question capture is saved to
+`data/debug/` — listen to what the mic actually got before tuning
+anything (play the last `q-*.wav`). On the Pi, faster-whisper
+`small.en` transcribed real captures perfectly where the old
+whisper.cpp HTTP server returned garbage — suspect the engine before
+the microphone.
 
 ---
 

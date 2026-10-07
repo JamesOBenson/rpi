@@ -1,5 +1,32 @@
 # Recent Changes - STEM Buddy
 
+## Oct 7 — far-field audio fix (Pi now hears perfectly)
+
+After moving the Pi, questions stopped transcribing. Root-caused with an
+A/B test on a real 3.6 s capture: **faster-whisper `small.en` int8
+transcribed it perfectly ("What's the capital of France?") while the
+whisper.cpp HTTP server returned an empty string.** The engine was the
+problem, not the mic. Changes on the Pi + in-tree:
+
+1. **Question engine: in-process faster-whisper** — `stt.question_engine:
+   "whisper"`, `stt.whisper_model: "small.en"` (same model/config the
+   whisplay-ai-chatbot uses). `whisper-server.service` stopped; the
+   separate whisper.cpp server is no longer needed.
+2. **Question capture: sox silence endpoint** (ported from the chatbot)
+   replacing the custom energy VAD. Stops 0.7 s after you stop speaking;
+   threshold 4% for the current room (hardcoded in `src/stt_engine.py`
+   — retune for a new room). Ring-buffer fallback rescues one-breath
+   "buddy + question" utterances (> 1.5 s).
+3. **Wake chime** — the whisplay-ai-chatbot's sox synth verbatim
+   (720/980/1320 Hz, gain -30) plays when "Buddy" lands, so the user
+   gets audible confirmation.
+4. **Debug audio** — with `stt.debug_audio: true`, everything fed to the
+   endpoint is dumped to `data/debug/` (`last-question-raw.wav`) for
+   exactly-reproducible A/B tests.
+5. Docs: README pipeline/perf/troubleshooting updated; notes added to
+   WHISPER_HTTP.md and STARTUP.md that in-process whisper is now the
+   default.
+
 ## Summary
 
 Switched to a modular architecture with HTTP servers for better performance and reliability.

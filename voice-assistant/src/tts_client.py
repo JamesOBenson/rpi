@@ -50,12 +50,14 @@ class TTSClient:
             print(f"⚠ TTS server unavailable ({e})")
             raise
 
-    def synthesize(self, text: str) -> np.ndarray:
+    def synthesize(self, text: str, speed: float = 0.9, length_scale: float = 1.0) -> np.ndarray:
         """
         Synthesize text to audio via HTTP.
         
         Args:
             text: Text to synthesize
+            speed: Overall speed multiplier (default 0.9)
+            length_scale: Speech rate control (default 1.0, lower = faster)
             
         Returns:
             NumPy array of float32 audio samples (-1.0..1.0)
@@ -68,7 +70,7 @@ class TTSClient:
         try:
             resp = requests.post(
                 f"{self.server_url}/synthesize",
-                json={"text": text},
+                json={"text": text, "speed": speed, "length_scale": length_scale},
                 timeout=self.timeout,
             )
             

@@ -102,7 +102,7 @@ class STEMBuddy:
             self.wake = WakeWordListener(
                 wake_word=self.wake_word,
                 model_size=stt_cfg.get("model_size", "small"),
-                hybrid=(self.question_engine in ("whisper", "hailo")),
+                hybrid=(self.question_engine in ("whisper", "hailo", "whisper-http")),
                 debug_audio=stt_cfg.get("debug_audio", False),
                 framework="vosk",
                 wake_confidence=ww_cfg.get("wake_confidence", 0.3),
@@ -148,7 +148,7 @@ class STEMBuddy:
         # original audio, so it degrades to today's behavior at worst.
         self.spk_filter = None
         spk_cfg = stt_cfg.get("speaker_lock", {})
-        if spk_cfg.get("enabled", True) and self.question_engine in ("whisper", "hailo"):
+        if spk_cfg.get("enabled", True) and self.question_engine in ("whisper", "hailo", "whisper-http"):
             try:
                 from speaker_filter import SpeakerFilter
                 model_path = Path(spk_cfg.get("model", "models/spk/campplus_en.onnx"))

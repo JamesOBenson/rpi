@@ -1,5 +1,11 @@
 # Whisper HTTP Server
 
+> **Note (Oct 7):** the Pi now ships `question_engine: "whisper"`
+> (in-process faster-whisper) and `whisper-server.service` is stopped.
+> This HTTP mode is optional — use it only if you want the model in a
+> separate warm process. An A/B on the same capture showed the in-process
+> faster-whisper path is the reliable one on this hardware.
+
 Keeps the Whisper model loaded in a separate process, avoiding reload overhead and isolating crashes.
 
 ## Why Use This?

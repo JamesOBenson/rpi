@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 
 import numpy as np
+import requests
 
 PROJECT_ROOT = Path(__file__).parent.parent
 SAMPLE_RATE = 16000

@@ -94,12 +94,14 @@ class TTS:
         
         return None
     
-    def synthesize(self, text: str) -> bytes:
+    def synthesize(self, text: str, speed: float = 0.9, length_scale: float = 1.0) -> bytes:
         """
         Synthesize text to WAV audio.
         
         Args:
             text: Text to synthesize
+            speed: Overall speed multiplier (default 0.9)
+            length_scale: Speech rate control (default 1.0, lower = faster)
             
         Returns:
             WAV audio bytes
@@ -115,7 +117,7 @@ class TTS:
             cmd.extend(["-c", str(self.voice_config)])
         
         # Add optional parameters
-        cmd.extend(["-s", "0.9", "-f", "-"])  # speed 0.9x, output to stdout
+        cmd.extend(["-s", str(speed), "-l", str(length_scale), "-f", "-"])
         
         try:
             result = subprocess.run(
@@ -171,6 +173,8 @@ class TTSHandler(BaseHTTPRequestHandler):
         try:
             data = json.loads(body.decode("utf-8"))
             text = data.get("text", "")
+            speed = data.get("speed", 0.9)
+            length_scale = data.get("length_scale", 1.0)
         except json.JSONDecodeError:
             self.send_response(400)
             self.send_header("Content-Type", "application/json")
@@ -193,7 +197,7 @@ class TTSHandler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({"error": "TTS not loaded"}).encode())
             return
         
-        audio = TTS._instance.synthesize(text)
+        audio = TTS._instance.synthesize(text, speed, length_scale)
         
         if not audio:
             self.send_response(500)

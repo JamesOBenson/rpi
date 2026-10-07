@@ -1,5 +1,11 @@
 # STEM Buddy Startup Guide
 
+> **Note (Oct 7):** the Pi now runs `question_engine: "whisper"`
+> (in-process faster-whisper, no separate HTTP server) with the Vosk
+> grammar wake word. Steps below describing `whisper-http` / openwakeword
+> auto-start are for the older setups and still work, but are not what
+> the Pi uses today.
+
 ## Quick Start
 
 ### 1. Install Dependencies
