@@ -552,7 +552,10 @@ class WakeWordListener:
                     if self.wake_word in text.split():
                         confs = [r.get("conf", 0.0)
                                  for r in res.get("result", [])]
-                        conf = max(confs) if confs else 0.0
+                        # Some vosk builds omit per-word conf in grammar
+                        # mode; the grammar already restricts output to
+                        # the wake word, so trust the text in that case.
+                        conf = max(confs) if confs else (1.0 if text else 0.0)
                         if conf >= self.wake_conf:
                             if self.hybrid:
                                 # Speaker-lock reference: the ring's last
