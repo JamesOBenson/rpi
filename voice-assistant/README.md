@@ -147,7 +147,7 @@ plug in a USB mic + speaker. Then, in order:
 ```bash
 # 1. System packages (audio, venv, build tools for RNNoise)
 sudo apt update
-sudo apt install -y alsa-utils python3-venv portaudio19-dev build-essential wget
+sudo apt install -y git alsa-utils python3-venv portaudio19-dev build-essential wget
 
 # 2. Code + Python deps (vosk, faster-whisper, piper-tts, openwakeword, ...)
 cd ~
