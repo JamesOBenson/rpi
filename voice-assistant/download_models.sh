@@ -48,13 +48,15 @@ else
 fi
 
 
-# 2c. Speaker-lock model (CAMPPlus, 29.6MB) - no stable public URL for the
-#     exact en build; copy from an existing install:
-#     scp rpi@<original-pi>:~/voice-assistant/models/spk/campplus_en.onnx \
-#         models/spk/campplus_en.onnx
+# 2c. Speaker-lock model (CAMPPlus, 29.6MB) - no public source for this
+#     exact build, so it's stored in this repo: voice-assistant/models/spk/
 mkdir -p spk
-[ -f spk/campplus_en.onnx ] && echo "      Speaker-lock model - already present" \
-  || echo "      NOTE: speaker-lock model missing (speaker lock disabled)"
+if [ ! -f "spk/campplus_en.onnx" ]; then
+    echo "      Speaker-lock CAMPPlus model (29.6MB)..."
+    wget -q "https://github.com/JamesOBenson/rpi/raw/main/voice-assistant/models/spk/campplus_en.onnx" -O spk/campplus_en.onnx
+else
+    echo "      Speaker-lock model - already present"
+fi
 
 # 3. Gemma 3n E2B LLM (2.9GB) - if missing
 #    Backup: Qwen3-1.7B (1.2GB, prompted below) - equally good answers.
