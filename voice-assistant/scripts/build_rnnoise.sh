@@ -5,7 +5,7 @@
 set -e
 cd "$(dirname "$0")/.."
 rm -rf /tmp/rnnoise-0.1.1
-wget -q https://github.com/xiph/rnnoise/archive/refs/tags/v0.1.1.tar.gz
+wget -q -O rnnoise-0.1.1.tar.gz https://github.com/xiph/rnnoise/archive/refs/tags/v0.1.1.tar.gz
 tar xzf rnnoise-0.1.1.tar.gz && rm rnnoise-0.1.1.tar.gz
 cd rnnoise-0.1.1
 mkdir -p ../lib
