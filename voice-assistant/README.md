@@ -147,11 +147,11 @@ plug in a USB mic + speaker. Then, in order:
 ```bash
 # 1. System packages (audio, venv, build tools for RNNoise)
 sudo apt update
-sudo apt install -y git alsa-utils python3-venv portaudio19-dev build-essential wget
+sudo apt install -y git alsa-utils sox python3-venv portaudio19-dev build-essential wget
 
 # 2. Code + Python deps (vosk, faster-whisper, piper-tts, openwakeword, ...)
 cd ~
-git clone https://github.com/JamesOBenson/rpi.git && cd rpi/voice-assistant
+git clone https://github.com/JamesOBenson/rpi.git voice-assistant && cd voice-assistant
 python3 -m venv venv
 venv/bin/pip install -r requirements.txt
 
@@ -171,13 +171,38 @@ venv/bin/pip install -r requirements.txt
 arecord -l                     # check your mic is the default device
 ```
 
-6. **Service** — write `/etc/systemd/system/stem-buddy.service` (adjust
-   paths/username if you're not `rpi`):
+6. **Services** — write both unit files (the Whisper STT server stays warm
+   in its own process; the assistant talks to it over localhost). Adjust
+   paths/username if you're not `rpi`:
+
+`/etc/systemd/system/whisper-server.service`:
+
+```ini
+[Unit]
+Description=STEM Buddy Whisper HTTP server
+After=network.target
+
+[Service]
+Type=simple
+User=rpi
+Group=rpi
+WorkingDirectory=/home/rpi/voice-assistant
+Environment=HOME=/home/rpi
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/rpi/voice-assistant/venv/bin/python src/whisper_server.py --model small.en --port 8765
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+```
+
+`/etc/systemd/system/stem-buddy.service`:
 
 ```ini
 [Unit]
 Description=STEM Buddy voice assistant
-After=network.target sound.target
+After=network.target sound.target whisper-server.service
 
 [Service]
 User=rpi
@@ -193,8 +218,8 @@ WantedBy=multi-user.target
 ```bash
 # 7. Start + verify (~40 s to full startup)
 sudo systemctl daemon-reload
-sudo systemctl enable --now stem-buddy.service
-journalctl -u stem-buddy -f    # good signs: "✓ Whisper STT ready" then [LISTENING]
+sudo systemctl enable --now whisper-server.service stem-buddy.service
+journalctl -u stem-buddy -f    # good signs: "✓ Whisper server ready" then [LISTENING]
 ```
 
 Wiring the GPIO button/LED? Add your user to the `gpio` group first:
