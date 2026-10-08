@@ -406,11 +406,37 @@ class STEMBuddy:
         Bounded gain (max 6x) helps quiet speech without turning room
         noise into a wall of sound. Audio already at/above target is
         passed through untouched.
+
+        The capture starts with the wake word, which kids shout right
+        into the mic (peak ~0.9) while the actual question lands at
+        0.2-0.4. Normalizing the whole capture is pinned by that loud
+        wake word, so the question stays ~3x too quiet and Whisper
+        drops consonants ("sky" -> "gun"). Scale relative to the
+        post-wake speech instead: find the first quiet gap after
+        startup, then normalize the tail.
         """
         peak = float(np.abs(audio).max())
-        if peak < 1e-4 or peak >= target_peak:
+        if peak < 1e-4:
             return audio
-        return audio * min(target_peak / peak, max_gain)
+        tail = audio
+        n = len(audio)
+        if n > 2 * 16000:  # >2s: there is a wake word to skip past
+            sr = 16000
+            frame = sr // 10  # 0.1s
+            env = [float(np.abs(audio[i * frame:(i + 1) * frame]).max())
+                   for i in range(min(40, n // frame))]
+            start = 0
+            for i in range(len(env) - 1):
+                if env[i] > 0.15 and env[i + 1] < 0.05:  # voice -> gap
+                    start = (i + 1) * frame
+                    break
+            if start > 0.3 * sr and n - start > 0.5 * sr:
+                tail = audio[start:]
+        tail_peak = float(np.abs(tail).max())
+        if tail_peak < 1e-4 or tail_peak >= target_peak:
+            return audio
+        gain = min(target_peak / tail_peak, max_gain)
+        return np.clip(audio * gain, -1.0, 1.0)
 
     def _strip_wake(self, text: str) -> str:
         """Remove a leading wake word / filler from a transcript.

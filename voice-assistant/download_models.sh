@@ -37,6 +37,16 @@ else
     echo "2/3: Piper TTS voice - already present"
 fi
 
+# 2b. OpenWakeWord 'buddy' wake model (1.2MB) - custom community model
+#     https://huggingface.co/benjamin-paine/hey-buddy
+mkdir -p oww
+if [ ! -f "oww/hey-buddy.onnx" ]; then
+    echo "      OpenWakeWord buddy wake model (1.2MB)..."
+    wget -q "https://huggingface.co/benjamin-paine/hey-buddy/resolve/main/models/hey-buddy.onnx" -O oww/hey-buddy.onnx
+else
+    echo "      OpenWakeWord buddy wake model - already present"
+fi
+
 # 3. Gemma 3n E2B LLM (2.9GB) - if missing
 #    Backup: Qwen3-1.7B (1.2GB, prompted below) - equally good answers.
 #    Switch with llm.model in ../config/settings.yaml
@@ -71,7 +81,7 @@ fi
 
 echo ""
 echo "=== Done! Models in $(pwd) ==="
-ls -lh *.gguf *.onnx* 2>/dev/null
+ls -lh *.gguf *.onnx* oww/*.onnx 2>/dev/null
 echo ""
 echo "To switch LLM: edit config/settings.yaml -> llm.model"
 echo "To switch STT: edit config/settings.yaml -> stt.question_engine (whisper|vosk)"
