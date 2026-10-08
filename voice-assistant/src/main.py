@@ -209,23 +209,38 @@ class STEMBuddy:
         # Opened at 48 kHz when noise suppression is on: RNNoise works at
         # 48k and the wrapper hands 16k back to everything downstream.
         ns = self.config.get("audio", {}).get("noise_suppression", True)
+        audio_cfg = self.config.get("audio", {})
+        try:
+            from audio_chain import SignalChain, HighPass, AGC
+            hp_hz = float(audio_cfg.get("highpass_hz", 100))
+            hp = HighPass(sr=self.wake.sample_rate, fc=hp_hz)
+            agc = AGC() if audio_cfg.get("agc", True) else None
+        except Exception as e:
+            hp = agc = None
+            hp_hz = 0
+            console.print(f"[yellow]⚠ signal chain unavailable ({e})[/yellow]")
         if ns:
             try:
                 from noise_suppressor import NoiseSuppressedStream
-                self.stream = sd.InputStream(
+                base = sd.InputStream(
                     samplerate=48000, channels=1, dtype="float32"
                 )
-                self.stream.start()
-                self.stream = NoiseSuppressedStream(self.stream)
-                console.print("[green]✓ Noise suppression on (RNNoise)[/green]")
+                base.start()
+                self.stream = SignalChain(
+                    NoiseSuppressedStream(base), hp, agc)
+                console.print(
+                    f"[green]✓ RNNoise + highpass {hp_hz:.0f} Hz"
+                    + (" + AGC[/green]" if agc else "[/green]")
+                )
             except Exception as e:
                 console.print(f"[yellow]⚠ Noise suppression unavailable ({e}) - raw mic[/yellow]")
                 ns = False
         if not ns:
-            self.stream = sd.InputStream(
+            base = sd.InputStream(
                 samplerate=self.wake.sample_rate, channels=1, dtype="float32"
             )
-            self.stream.start()
+            base.start()
+            self.stream = SignalChain(base, hp, agc)
         console.print("[green]✓ Microphone live - always listening[/green]")
 
         while self.running:
@@ -409,33 +424,30 @@ class STEMBuddy:
 
         The capture starts with the wake word, which kids shout right
         into the mic (peak ~0.9) while the actual question lands at
-        0.2-0.4. Normalizing the whole capture is pinned by that loud
-        wake word, so the question stays ~3x too quiet and Whisper
-        drops consonants ("sky" -> "gun"). Scale relative to the
-        post-wake speech instead: find the first quiet gap after
-        startup, then normalize the tail.
+        0.2-0.4. So: find the first quiet gap after startup voice and
+        drop everything before it (pre-wake room noise + the wake word
+        itself), then scale the remainder to target. One-breath
+        "buddy <question>" has no gap and is left whole.
         """
         peak = float(np.abs(audio).max())
         if peak < 1e-4:
             return audio
-        tail = audio
+        sr = 16000
         n = len(audio)
-        if n > 2 * 16000:  # >2s: there is a wake word to skip past
-            sr = 16000
+        if n > 2 * sr:  # >2s: there is a wake word to skip past
             frame = sr // 10  # 0.1s
             env = [float(np.abs(audio[i * frame:(i + 1) * frame]).max())
                    for i in range(min(40, n // frame))]
-            start = 0
             for i in range(len(env) - 1):
-                if env[i] > 0.15 and env[i + 1] < 0.05:  # voice -> gap
+                if env[i] > 0.15 and env[i + 1] < 0.10:  # voice -> gap
                     start = (i + 1) * frame
+                    if start > 0.3 * sr and n - start > 0.5 * sr:
+                        audio = audio[start:]
                     break
-            if start > 0.3 * sr and n - start > 0.5 * sr:
-                tail = audio[start:]
-        tail_peak = float(np.abs(tail).max())
-        if tail_peak < 1e-4 or tail_peak >= target_peak:
+        peak = float(np.abs(audio).max())
+        if peak < 1e-4 or peak >= target_peak:
             return audio
-        gain = min(target_peak / tail_peak, max_gain)
+        gain = min(target_peak / peak, max_gain)
         return np.clip(audio * gain, -1.0, 1.0)
 
     def _strip_wake(self, text: str) -> str:
@@ -473,6 +485,9 @@ class STEMBuddy:
         stop_event = threading.Event()
         self.led.set_state(LEDState.SPEAKING)
         self._speak_streaming(question, stop_event)
+        # Echo gate: ignore the acoustic tail of our own TTS (room reverb,
+        # same-board speaker) so it can't trip the wake word.
+        self.wake.muted_until = time.time() + 0.6
 
         if stop_event.is_set():
             console.print("[red]Interrupted by 'STOP'[/red]")

@@ -344,6 +344,9 @@ class WakeWordListener:
         # model, so it costs almost nothing.
         self.wake_rec = None
         self.wake_conf = wake_confidence
+        # Set by main after TTS playback: wake detection is ignored until
+        # this timestamp (acoustic tail of our own voice, room reverb).
+        self.muted_until = 0.0
         if framework == "porcupine":
             try:
                 import pvporcupine
@@ -576,7 +579,8 @@ class WakeWordListener:
                 if state == "question":
                     self._cap.append(pcm)
 
-            if self.oww_model is not None and state == "idle":
+            if self.oww_model is not None and state == "idle" and \
+                    now >= self.muted_until:
                 try:
                     prediction = self.oww_model.predict(pcm)
                 except Exception:
@@ -605,7 +609,8 @@ class WakeWordListener:
                     self._q_sox_fails = 0
                     break
 
-            if self.porcupine is not None and state == "idle":
+            if self.porcupine is not None and state == "idle" and \
+                    now >= self.muted_until:
                 # Porcupine wants fixed 512-sample (32ms) frames; a 0.1s
                 # chunk isn't a whole number of them, so carry the remainder.
                 buf = np.concatenate([self._pv_buf, pcm])
@@ -629,7 +634,8 @@ class WakeWordListener:
                         self._cap = []
                         break
 
-            if self.wake_rec is not None and state == "idle":
+            if self.wake_rec is not None and state == "idle" and \
+                    now >= self.muted_until:
                 # Grammar recognizer endpointing is independent of rec's.
                 if self.wake_rec.AcceptWaveform(chunk):
                     res = json.loads(self.wake_rec.FinalResult())
