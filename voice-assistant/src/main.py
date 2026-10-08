@@ -81,37 +81,28 @@ class STEMBuddy:
         ww_cfg = self.config.get("wake_word", {})
         ww_framework = ww_cfg.get("framework", "openwakeword").lower()
         
-        # Initialize wake word listener based on framework
-        self.wake = None
-        if ww_framework == "openwakeword":
-            try:
-                from openwakeword_listener import OpenWakeWordListener
-                wake_words = [w.strip() for w in ww_cfg.get("wake_words", "buddy").split(",")]
-                self.wake = OpenWakeWordListener(
-                    wake_words=wake_words,
-                    threshold=ww_cfg.get("threshold", 0.5),
-                    cooldown=ww_cfg.get("cooldown", 1.5),
-                )
-                print(f"✓ Using OpenWakeWord (wake words: {wake_words})")
-            except Exception as e:
-                print(f"⚠ OpenWakeWord unavailable ({e}) - falling back to Vosk")
-                ww_framework = "vosk"
-        
-        if ww_framework == "vosk" or self.wake is None:
-            # Fallback to Vosk
-            self.wake = WakeWordListener(
-                wake_word=self.wake_word,
-                model_size=stt_cfg.get("model_size", "small"),
-                hybrid=(self.question_engine in ("whisper", "hailo", "whisper-http")),
-                debug_audio=stt_cfg.get("debug_audio", False),
-                framework="vosk",
-                wake_confidence=ww_cfg.get("wake_confidence", 0.3),
-            )
+        # Initialize wake word listener based on framework.
+        # Both frameworks run inside WakeWordListener: openwakeword adds
+        # its detector on top of the Vosk grammar one (whichever hears
+        # the wake word first wins); if OWW can't load, Vosk carries alone.
+        wake_words = [w.strip() for w in ww_cfg.get("wake_words", "buddy").split(",")]
+        self.wake = WakeWordListener(
+            wake_word=self.wake_word,
+            model_size=stt_cfg.get("model_size", "small"),
+            hybrid=(self.question_engine in ("whisper", "hailo", "whisper-http")),
+            debug_audio=stt_cfg.get("debug_audio", False),
+            framework="vosk",
+            wake_confidence=ww_cfg.get("wake_confidence", 0.3),
+            oww_models=wake_words if ww_framework == "openwakeword" else None,
+            oww_threshold=ww_cfg.get("threshold", 0.5),
+            oww_cooldown=ww_cfg.get("cooldown", 1.5),
+        )
+        if ww_framework == "openwakeword" and self.wake.oww_model is None:
+            print("⚠ OpenWakeWord unavailable - using Vosk grammar wake")
+        elif ww_framework == "openwakeword":
+            print(f"✓ Using OpenWakeWord (wake words: {wake_words})")
+        else:
             print(f"✓ Using Vosk wake word detection")
-        
-        # Start OpenWakeWord if using it
-        if ww_framework == "openwakeword" and hasattr(self.wake, 'start'):
-            self.wake.start()
         self.whisper = None
         self.hailo = None
         if self.question_engine in ("whisper", "hailo", "whisper-http"):

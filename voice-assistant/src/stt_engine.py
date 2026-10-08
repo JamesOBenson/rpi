@@ -52,6 +52,44 @@ VOSK_MODELS = {
     "large": "vosk-model-en-us-0.22",
 }
 
+# Custom openWakeWord models shipped in the repo (name -> onnx file).
+# 'buddy' is not an official openWakeWord model - it's a community model
+# (https://huggingface.co/benjamin-paine/hey-buddy).
+OWW_CUSTOM_MODELS = {
+    "buddy": PROJECT_ROOT / "models" / "oww" / "hey-buddy.onnx",
+}
+
+
+def _load_oww_model(words):
+    """Build an openWakeWord Model for the given wake words.
+
+    Custom names resolve to the repo onnx files; official names to the
+    models bundled with the installed package (newer versions pass the
+    name through and download it themselves). Handles the API split:
+    OWW >= 0.5 takes wakeword_models (names/paths), 0.4.0 takes
+    wakeword_model_paths + class_mapping_dicts.
+    """
+    import openwakeword
+    from openwakeword.model import Model
+
+    res_dir = Path(openwakeword.__file__).parent / "resources" / "models"
+    paths = []
+    for w in words:
+        if w in OWW_CUSTOM_MODELS:
+            p = OWW_CUSTOM_MODELS[w]
+            if not p.exists():
+                raise FileNotFoundError(f"custom OWW model missing: {p}")
+            paths.append(str(p))
+            continue
+        bundled = sorted(res_dir.glob(w.replace(" ", "_") + "_v*.onnx"))
+        paths.append(str(bundled[0]) if bundled else w)
+    try:
+        return Model(wakeword_models=list(paths))  # OWW >= 0.5
+    except TypeError:
+        return Model(wakeword_model_paths=paths,
+                     class_mapping_dicts=[{"0": "background", "1": l}
+                                          for l in words])
+
 
 class SpeechToText:
     """Offline speech recognition with Vosk."""
@@ -232,6 +270,9 @@ class WakeWordListener:
         keyword: str = "",
         keyword_path: str = "",
         wake_confidence: float = 0.3,
+        oww_models: list = None,
+        oww_threshold: float = 0.5,
+        oww_cooldown: float = 1.5,
     ):
         if model_path is None:
             model_name = VOSK_MODELS.get(model_size, model_size)
@@ -330,6 +371,22 @@ class WakeWordListener:
             except Exception as e:
                 print(f"\u26a0 Porcupine unavailable ({e}) - "
                       f"falling back to Whisper wake-word judge")
+
+        # OpenWakeWord: runs on every idle chunk alongside the Vosk
+        # grammar detector - whichever hears the wake word first wins.
+        # Loads the custom 'buddy' model from the repo plus any official
+        # names (bundled with the installed package).
+        self.oww_model = None
+        self.oww_threshold = oww_threshold
+        self.oww_cooldown = oww_cooldown
+        self._oww_last_wake = 0.0
+        if oww_models:
+            try:
+                self.oww_model = _load_oww_model(oww_models)
+                print(f"\u2713 OpenWakeWord ready ({', '.join(oww_models)})")
+            except Exception as e:
+                print(f"\u26a0 OpenWakeWord unavailable ({e}) - "
+                      f"using Vosk grammar wake only")
 
         print("Loading wake-word model (Vosk)...")
         # Suppress Kaldi C++ log spam during model load
@@ -519,6 +576,35 @@ class WakeWordListener:
                 if state == "question":
                     self._cap.append(pcm)
 
+            if self.oww_model is not None and state == "idle":
+                try:
+                    prediction = self.oww_model.predict(pcm)
+                except Exception:
+                    prediction = {}
+                for keyword, score in prediction.items():
+                    if score < self.oww_threshold or \
+                            now - self._oww_last_wake < self.oww_cooldown:
+                        continue
+                    self._oww_last_wake = now
+                    if self.hybrid:
+                        # Last 1.5s of the ring holds the wake word
+                        # itself - speaker-lock reference.
+                        tail = np.concatenate(list(self._ring)[-15:])
+                        self.last_wake_audio = (tail / 32768.0
+                                                ).astype(np.float32)
+                        self._cap = []
+                    print(f"  \u2713 Wake word! (OWW {keyword} "
+                          f"score={score:.2f}) Say your question")
+                    self._play_wake_chime()
+                    state = "question"
+                    state_start = now
+                    self._q_flip = now
+                    self._q_silent, self._q_heard, self._q_wait = \
+                        0, False, False
+                    self._q_sox_kill()
+                    self._q_sox_fails = 0
+                    break
+
             if self.porcupine is not None and state == "idle":
                 # Porcupine wants fixed 512-sample (32ms) frames; a 0.1s
                 # chunk isn't a whole number of them, so carry the remainder.
@@ -622,6 +708,10 @@ class WakeWordListener:
                     except Exception:
                         pass  # sox already ended at its endpoint
                 if self._q_sox is not None and self._q_sox.poll() is not None:
+                    try:
+                        self._q_sox.stdin.close()  # flush pipe before drop
+                    except Exception:
+                        pass
                     self._q_sox = None
                     self._q_dbg_flush()
                     if now - self._q_sox_start < 0.3:
