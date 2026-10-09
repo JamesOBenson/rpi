@@ -347,6 +347,11 @@ class WakeWordListener:
         # Set by main after TTS playback: wake detection is ignored until
         # this timestamp (acoustic tail of our own voice, room reverb).
         self.muted_until = 0.0
+        # Global cross-detector wake cooldown (OWW + Vosk + Porcupine all
+        # fire independently; without this one 'buddy' plays the chime
+        # several times as each detector latches onto the same audio).
+        self.wake_gap = 3.0
+        self._last_wake_any = 0.0
         if framework == "porcupine":
             try:
                 import pvporcupine
@@ -525,11 +530,16 @@ class WakeWordListener:
             pass
         self._q_dbg = []
 
-    def _play_wake_chime(self):
+    def _play_wake_chime(self, reason=""):
         """The whisplay-ai-chatbot wakeup chime, verbatim: sox synth three
         rising tones (720/980/1320 Hz) at -30 dB straight to ALSA - no
         file, no aplay. Quiet by design (won't trip the 4% question
-        endpoint via speaker->mic feedback)."""
+        endpoint via speaker->mic feedback).
+
+        Every chime logs a [chime] line, flushed immediately so it lands
+        in the journal at the moment the sound plays - that's how a
+        chime you hear gets correlated with the detector that fired it."""
+        print(f"[chime] {time.strftime('%H:%M:%S')} {reason}", flush=True)
         try:
             subprocess.Popen(
                 ["sox", "-q", "-n", "-t", "alsa", "default",
@@ -587,9 +597,11 @@ class WakeWordListener:
                     prediction = {}
                 for keyword, score in prediction.items():
                     if score < self.oww_threshold or \
-                            now - self._oww_last_wake < self.oww_cooldown:
+                            now - self._oww_last_wake < self.oww_cooldown or \
+                            now - self._last_wake_any < self.wake_gap:
                         continue
                     self._oww_last_wake = now
+                    self._last_wake_any = now
                     if self.hybrid:
                         # Last 1.5s of the ring holds the wake word
                         # itself - speaker-lock reference.
@@ -599,7 +611,7 @@ class WakeWordListener:
                         self._cap = []
                     print(f"  \u2713 Wake word! (OWW {keyword} "
                           f"score={score:.2f}) Say your question")
-                    self._play_wake_chime()
+                    self._play_wake_chime(f"OWW {keyword} score={score:.2f}")
                     state = "question"
                     state_start = now
                     self._q_flip = now
@@ -610,7 +622,8 @@ class WakeWordListener:
                     break
 
             if self.porcupine is not None and state == "idle" and \
-                    now >= self.muted_until:
+                    now >= self.muted_until and \
+                    now - self._last_wake_any >= self.wake_gap:
                 # Porcupine wants fixed 512-sample (32ms) frames; a 0.1s
                 # chunk isn't a whole number of them, so carry the remainder.
                 buf = np.concatenate([self._pv_buf, pcm])
@@ -627,7 +640,8 @@ class WakeWordListener:
                         self.last_wake_audio = (tail / 32768.0
                                                 ).astype(np.float32)
                         print("  \u2713 Wake word! Say your question")
-                        self._play_wake_chime()
+                        self._last_wake_any = now
+                        self._play_wake_chime("porcupine")
                         state = "question"
                         state_start = now
                         self._q_flip = now
@@ -635,7 +649,8 @@ class WakeWordListener:
                         break
 
             if self.wake_rec is not None and state == "idle" and \
-                    now >= self.muted_until:
+                    now >= self.muted_until and \
+                    now - self._last_wake_any >= self.wake_gap:
                 # Grammar recognizer endpointing is independent of rec's.
                 if self.wake_rec.AcceptWaveform(chunk):
                     res = json.loads(self.wake_rec.FinalResult())
@@ -659,7 +674,8 @@ class WakeWordListener:
                                 self._cap = []
                             print(f"  \u2713 Wake word! (conf {conf:.2f} "
                                   f"heard {text!r}) Say your question")
-                            self._play_wake_chime()
+                            self._last_wake_any = now
+                            self._play_wake_chime(f"vosk conf={conf:.2f} heard={text!r}")
                             state = "question"
                             state_start = now
                             self._q_flip = now
