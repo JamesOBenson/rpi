@@ -594,10 +594,11 @@ class WakeWordListener:
                 # Diagnostic: peak level of the last 6s of mic audio.
                 # If this prints ~2% or below, the speaker's voice isn't
                 # reaching the endpointer - next step is the AGC floor.
-                _ring = np.concatenate(list(self._ring)[-60:])
+                _ring = np.concatenate(list(self._ring)[-60:]).astype(
+                    np.float32)  # float32: int16 squares overflow
                 print(f"  (diagnostic: ring peak "
-                      f"{float(np.abs(_ring).max()) * 100:.1f}% "
-                      f"rms {float(np.sqrt(np.mean(np.square(_ring)))) * 100:.1f}%)")
+                      f"{float(np.abs(_ring).max()) / 32767 * 100:.1f}% "
+                      f"rms {float(np.sqrt(np.mean(np.square(_ring)))) / 32767 * 100:.1f}%)")
                 self._q_sox_kill()
                 state = "idle"
                 state_start = now

@@ -52,10 +52,15 @@ def _new_state(lib):
 def _decimate3(x48):
     """48 kHz -> 16 kHz: keep the 0-8 kHz spectrum, IFFT at 1/3 length.
     Exact for len(x48) % 6 == 0 (all chunks are: n16 is a multiple
-    of 160 samples = 10 RNNoise frames)."""
+    of 160 samples = 10 RNNoise frames).
+    The /3 is required: rfft accumulates n samples but irfft only
+    divides by n/6, so the output is 3x too loud without it - which
+    lifted the noise floor above the AGC gate and sox's 2% trigger
+    and broke question endpointing."""
     n = len(x48) // 6 * 6
     spec = np.fft.rfft(x48[:n])
-    return np.fft.irfft(spec[: n // 6 + 1], n=n // 3)
+    return (np.fft.irfft(spec[: n // 6 + 1], n=n // 3) / 3).astype(
+        np.float32)
 
 
 class NoiseSuppressedStream:
