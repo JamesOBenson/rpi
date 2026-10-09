@@ -1,0 +1,17 @@
+[Unit]
+Description=STEM Buddy Whisper HTTP server
+After=network.target
+
+[Service]
+Type=simple
+User=__USER__
+Group=__USER__
+WorkingDirectory=__DIR__
+Environment=HOME=__HOME__
+Environment=PYTHONUNBUFFERED=1
+ExecStart=__DIR__/venv/bin/python src/whisper_server.py --model small.en --port 8765 --prompt '__PROMPT__'
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

@@ -21,6 +21,13 @@ ssh rpi 'sudo systemctl restart stem-buddy.service'
 ssh rpi 'journalctl -u stem-buddy --since "1 min ago" --no-pager | tail'
 ```
 
+When the service units or the Whisper prompt change (`systemd/` or
+`start_whisper_server.sh`):
+
+```bash
+ssh rpi 'cd <voice-assistant checkout> && bash systemd/install.sh'
+```
+
 ## Fresh install (on the Pi)
 
 ```bash
@@ -29,14 +36,18 @@ python3 -m venv venv
 venv/bin/pip install -r requirements.txt
 ./download_models.sh          # STT + TTS + LLM models (~1-3GB)
 sudo usermod -aG gpio rpi     # only if wiring GPIO pins
-sudo systemctl enable --now stem-buddy.service
+bash systemd/install.sh       # generates service units with real paths, starts both
 ```
 
 ## Notes
 
-- **Question STT runs in-process** (`question_engine: "whisper"`,
-  faster-whisper small.en int8) — no separate whisper server.
-  `whisper-server.service` (whisper.cpp) is stopped and unused.
+- **Question STT runs in a separate HTTP server** (`whisper-server.service`,
+  faster-whisper small.en int8 on port 8765, with the STEM/cybersecurity +
+  question bias from `systemd/install.sh`). The in-process `whisper` engine
+  remains available via `question_engine: "whisper"`.
+- Service units are **generated** from `systemd/*.service.in` by
+  `systemd/install.sh` — paths and the Whisper prompt are substituted at
+  install time, so no username or install location is hardcoded.
 - **Piper** binary: `bin/piper/piper` (v1.2.0); voice model
   `models/en_US-lessac-medium.onnx`.
 - **RNNoise** lib: `lib/librnnoise.so` (rebuild with

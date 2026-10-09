@@ -1,0 +1,13 @@
+[Unit]
+Description=STEM Buddy voice assistant
+After=network.target sound.target
+
+[Service]
+User=__USER__
+WorkingDirectory=__DIR__
+Environment=PYTHONPATH=__DIR__
+ExecStart=__DIR__/venv/bin/python src/main.py
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
