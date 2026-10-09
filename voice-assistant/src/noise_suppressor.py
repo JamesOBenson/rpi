@@ -17,6 +17,7 @@ Vosk/Whisper see it.
 """
 
 import ctypes
+from collections import deque
 from pathlib import Path
 import numpy as np
 
@@ -75,11 +76,15 @@ class NoiseSuppressedStream:
         self._lib = _load_lib()
         self._state = _new_state(self._lib)
         self._base = base_stream
+        # raw 48k mic ring for A/B compare vs the processed path
+        # (1600 x ~10ms chunks = 16s)
+        self._raw = deque(maxlen=1600)
 
     def read(self, n16):
         n48 = n16 * 3
         data, overflow = self._base.read(n48)
         x = data.flatten().astype(np.float32)
+        self._raw.append(x)
         if len(x) % _FRAME:  # defensive; real chunks always align
             x = np.concatenate([x, np.zeros(_FRAME - len(x) % _FRAME,
                                             dtype=np.float32)])
@@ -91,6 +96,14 @@ class NoiseSuppressedStream:
                 x[i:i + _FRAME].ctypes.data_as(ctypes.POINTER(ctypes.c_float)))
         out = _decimate3(y)
         return out.astype(np.float32).reshape(-1, 1), overflow
+
+    def raw_last(self, seconds: float) -> np.ndarray:
+        """Most recent raw 48 kHz mic audio (pre-noise-suppression)."""
+        if not self._raw:
+            return np.zeros(0, dtype=np.float32)
+        n = int(seconds * 48000)
+        out = np.concatenate(list(self._raw))
+        return out[-n:] if len(out) >= n else out
 
     def stop(self):
         self._base.stop()

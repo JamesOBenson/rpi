@@ -268,6 +268,13 @@ class STEMBuddy:
                         print(f"  (speaker lock: {spk_info})")
                     if self.stt_cfg.get("debug_audio"):
                         self._save_debug_audio(q_audio)
+                        # raw mic recording of the same window (A/B compare)
+                        raw_last = getattr(self.stream, "raw_last", None)
+                        if raw_last is not None:
+                            mic = raw_last(len(q_audio) / 16000 + 0.5)
+                            if len(mic):
+                                self._save_debug_audio(
+                                    mic, "-mic", samplerate=48000)
                 if not question and self.whisper is not None and q_audio is not None:
                     # Separate-utterance case: wake word was its own sentence,
                     # so the question audio wasn't transcribed yet.
@@ -396,7 +403,8 @@ class STEMBuddy:
             self.wake.hailo = None
             return ""
 
-    def _save_debug_audio(self, audio: np.ndarray, suffix: str = ""):
+    def _save_debug_audio(self, audio: np.ndarray, suffix: str = "",
+                          samplerate: int = 16000):
         """Save the captured question WAV for debugging (stt.debug_audio: true)."""
         try:
             import wave
@@ -407,10 +415,10 @@ class STEMBuddy:
             with wave.open(str(path), "wb") as w:
                 w.setnchannels(1)
                 w.setsampwidth(2)
-                w.setframerate(16000)
+                w.setframerate(samplerate)
                 w.writeframes(pcm.tobytes())
             print(f"  \U0001f399 debug audio saved: {path.name} "
-                  f"({len(audio)/16000:.1f}s, peak={float(np.abs(audio).max()):.3f})")
+                  f"({len(audio)/samplerate:.1f}s, peak={float(np.abs(audio).max()):.3f})")
         except Exception as e:
             print(f"  (debug audio save failed: {e})")
 
