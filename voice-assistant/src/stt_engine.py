@@ -795,7 +795,35 @@ class WakeWordListener:
                         # next iteration; the question_timeout above bounds
                         # the overall wait.
                 if rec.AcceptWaveform(chunk):
+                    final = json.loads(
+                        rec.FinalResult()).get("text", "") or ""
                     rec.Reset()
+                    # Model-based endpoint (floor-independent fallback):
+                    # the AGC pins steady noise (fan) at ~12% RMS on this
+                    # mic, so sox's 2% level endpoint can never see the
+                    # 0.7s of silence it needs and every window times out
+                    # with the question discarded. Vosk finalizing a real
+                    # question ends the window; the sox capture still
+                    # feeds Whisper the boosted audio.
+                    if self._meaningful(final) and self._after_wake(final):
+                        self._q_sox_kill()
+                        self._q_dbg_flush()
+                        audio = self._read_sox_capture()
+                        if audio is None or \
+                                len(audio) < 1.5 * self.sample_rate:
+                            window = np.concatenate(
+                                list(self._ring)[-60:])
+                            ring_audio = self._trim_silence(window)
+                            if ring_audio is not None and \
+                                    len(ring_audio) > \
+                                    1.5 * self.sample_rate:
+                                audio = ring_audio
+                        if audio is not None:
+                            print(f"  (endpoint: vosk {final!r}, cap="
+                                  f"{len(audio) / self.sample_rate:.1f}s)")
+                            return "", audio
+                        # No usable capture: keep waiting; sox re-arms
+                        # next iteration, question_timeout still bounds it.
                 continue
 
             has_final = rec.AcceptWaveform(chunk)
