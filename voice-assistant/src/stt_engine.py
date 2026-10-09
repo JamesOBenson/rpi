@@ -352,6 +352,9 @@ class WakeWordListener:
         # several times as each detector latches onto the same audio).
         self.wake_gap = 3.0
         self._last_wake_any = 0.0
+        # Which detector fired the current wake - used by the confirmed-
+        # question chime so the [chime] log names the detector.
+        self._wake_reason = ""
         if framework == "porcupine":
             try:
                 import pvporcupine
@@ -552,6 +555,17 @@ class WakeWordListener:
             pass
 
     def wait_for_question(self, stream):
+        """Wake word + question capture, with the chime moved to the
+        end: it plays only when a question is actually confirmed. A
+        noise-triggered wake with no speech after it gets logged, not
+        chimed - that was the source of the random chimes (Vosk's
+        2-word grammar 'hears' buddy in ambient noise at conf 1.00)."""
+        q, audio = self._wait_for_question(stream)
+        if q or audio is not None:
+            self._play_wake_chime(self._wake_reason or "question")
+        return q, audio
+
+    def _wait_for_question(self, stream):
         """
         Block on an open sounddevice InputStream until the wake word is
         heard and a question is captured.
@@ -611,7 +625,7 @@ class WakeWordListener:
                         self._cap = []
                     print(f"  \u2713 Wake word! (OWW {keyword} "
                           f"score={score:.2f}) Say your question")
-                    self._play_wake_chime(f"OWW {keyword} score={score:.2f}")
+                    self._wake_reason = f"OWW {keyword} score={score:.2f}"
                     state = "question"
                     state_start = now
                     self._q_flip = now
@@ -641,22 +655,21 @@ class WakeWordListener:
                                                 ).astype(np.float32)
                         print("  \u2713 Wake word! Say your question")
                         self._last_wake_any = now
-                        self._play_wake_chime("porcupine")
+                        self._wake_reason = "porcupine"
                         state = "question"
                         state_start = now
                         self._q_flip = now
                         self._cap = []
                         break
 
-            # Grammar wake branch is FALLBACK ONLY: when OpenWakeWord is
-            # loaded it is the sole wake judge. A 2-word grammar recognizer
-            # has only 'buddy' to choose from, so it 'hears' buddy in
-            # ambient noise with conf 1.00 - conf cannot separate real
-            # from false (observed: 4 false fires at 0.60-1.00, real
-            # wakes at 0.74-1.00). OWW's score can (0.80-0.97 real vs
-            # 0.51 false). Vosk still does question endpointing below.
-            if self.wake_rec is not None and self.oww_model is None \
-                    and state == "idle" and \
+            # Grammar wake branch. Known weakness: a 2-word grammar has
+            # only 'buddy' to choose from, so it 'hears' buddy in ambient
+            # noise at conf up to 1.00 (observed: false fires at 0.60-1.00
+            # vs real wakes 0.74-1.00 - conf cannot separate them). That's
+            # why the chime no longer plays on the wake itself: it plays
+            # only when a question is confirmed (see wait_for_question).
+            # The wake just opens the question window.
+            if self.wake_rec is not None and state == "idle" and \
                     now >= self.muted_until and \
                     now - self._last_wake_any >= self.wake_gap:
                 # Grammar recognizer endpointing is independent of rec's.
@@ -683,7 +696,7 @@ class WakeWordListener:
                             print(f"  \u2713 Wake word! (conf {conf:.2f} "
                                   f"heard {text!r}) Say your question")
                             self._last_wake_any = now
-                            self._play_wake_chime(f"vosk conf={conf:.2f} heard={text!r}")
+                            self._wake_reason = f"vosk conf={conf:.2f} heard={text!r}"
                             state = "question"
                             state_start = now
                             self._q_flip = now

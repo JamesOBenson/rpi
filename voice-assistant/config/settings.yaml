@@ -24,7 +24,7 @@ wake_word:
   framework: "openwakeword"
   # OpenWakeWord settings
   wake_words: "buddy,hey_jarvis"  # comma-separated list
-  threshold: 0.6  # 0.0-1.0, higher = less false positives; observed real 'buddy' 0.80-0.97, one false fire at 0.51
+  threshold: 0.5  # 0.0-1.0, higher = less false positives; false chimes are now killed by the question-confirmed chime, not this threshold
   cooldown: 1.5   # seconds between triggers
   # Vosk settings (fallback)
   sensitivity: 0.6
