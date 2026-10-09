@@ -28,7 +28,7 @@ wake_word:
   cooldown: 1.5   # seconds between triggers
   # Vosk settings (fallback)
   sensitivity: 0.6
-  wake_confidence: 0.3
+  wake_confidence: 0.5
 
 stt:
   engine: "vosk"
