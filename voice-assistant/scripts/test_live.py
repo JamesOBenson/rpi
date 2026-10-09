@@ -38,7 +38,9 @@ print("Ready.", flush=True)
 
 stream = sd.InputStream(samplerate=16000, channels=1, dtype="float32")
 stream.start()
-print(">>> BEEP in 1s - when you hear it, say: Buddy, what is a black hole?", flush=True)
+print(
+    ">>> BEEP in 1s - when you hear it, say: Buddy, what is a black hole?", flush=True
+)
 time.sleep(1)
 beep()
 beep()
@@ -57,7 +59,9 @@ if q:
     stop_ev = threading.Event()
     watching = threading.Event()
     watching.set()
-    w = threading.Thread(target=wake.watch_for_stop, args=(stream, stop_ev, watching), daemon=True)
+    w = threading.Thread(
+        target=wake.watch_for_stop, args=(stream, stop_ev, watching), daemon=True
+    )
     w.start()
     tts.speak(ans, on_interrupt=stop_ev.is_set)
     watching.clear()

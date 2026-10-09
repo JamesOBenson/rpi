@@ -15,7 +15,6 @@ clean aarch64 wheels.
 
 import time
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 
@@ -42,7 +41,9 @@ class WhisperSTT:
 
         self.model_size = model_size
         self.initial_prompt = initial_prompt
-        print(f"Loading Whisper model ({model_size}, {compute_type}, {cpu_threads} threads)...")
+        print(
+            f"Loading Whisper model ({model_size}, {compute_type}, {cpu_threads} threads)..."
+        )
         t0 = time.time()
         # First run downloads the model from HuggingFace (~460MB for
         # small.en, ~140MB for base.en) into ~/.cache/huggingface -
@@ -50,7 +51,9 @@ class WhisperSTT:
         # NOTE: on the Pi 5 use 4 threads (the fast A76 cores). 8 threads
         # schedules onto the slow A55s and is ~2x slower (measured).
         self.model = WhisperModel(
-            model_size, device=device, compute_type=compute_type,
+            model_size,
+            device=device,
+            compute_type=compute_type,
             cpu_threads=cpu_threads,
         )
         print(f"✓ Whisper STT ready in {time.time() - t0:.1f}s")

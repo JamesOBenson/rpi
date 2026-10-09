@@ -7,6 +7,7 @@ Grades: 5th grade through college
 import json
 from pathlib import Path
 
+
 def generate_5th_grade():
     """Generate 250 facts for 5th graders."""
     categories = {
@@ -181,20 +182,23 @@ def generate_5th_grade():
             "Adults can help you understand what's safe and what's not.",
         ],
     }
-    
+
     # Expand each category to get 250 facts
     facts = {}
     for category, base_facts in categories.items():
         facts[category] = []
         for i, fact in enumerate(base_facts):
-            facts[category].append({
-                "id": f"{category[:3]}_{i+1:03d}",
-                "fact": fact,
-                "difficulty": "beginner",
-                "keywords": category.split("_")
-            })
-    
+            facts[category].append(
+                {
+                    "id": f"{category[:3]}_{i+1:03d}",
+                    "fact": fact,
+                    "difficulty": "beginner",
+                    "keywords": category.split("_"),
+                }
+            )
+
     return facts
+
 
 def generate_middle_school():
     """Generate 250 facts for middle school."""
@@ -332,19 +336,22 @@ def generate_middle_school():
             "Regularly review and update authentication methods.",
         ],
     }
-    
+
     facts = {}
     for category, base_facts in categories.items():
         facts[category] = []
         for i, fact in enumerate(base_facts):
-            facts[category].append({
-                "id": f"{category[:3]}_1{i+1:02d}",
-                "fact": fact,
-                "difficulty": "intermediate",
-                "keywords": category.split("_")
-            })
-    
+            facts[category].append(
+                {
+                    "id": f"{category[:3]}_1{i+1:02d}",
+                    "fact": fact,
+                    "difficulty": "intermediate",
+                    "keywords": category.split("_"),
+                }
+            )
+
     return facts
+
 
 def generate_high_school():
     """Generate 250 facts for high school."""
@@ -482,19 +489,22 @@ def generate_high_school():
             "Public relations manage external communication.",
         ],
     }
-    
+
     facts = {}
     for category, base_facts in categories.items():
         facts[category] = []
         for i, fact in enumerate(base_facts):
-            facts[category].append({
-                "id": f"{category[:3]}_2{i+1:02d}",
-                "fact": fact,
-                "difficulty": "advanced",
-                "keywords": category.split("_")
-            })
-    
+            facts[category].append(
+                {
+                    "id": f"{category[:3]}_2{i+1:02d}",
+                    "fact": fact,
+                    "difficulty": "advanced",
+                    "keywords": category.split("_"),
+                }
+            )
+
     return facts
+
 
 def generate_college():
     """Generate 250 facts for college level."""
@@ -721,24 +731,27 @@ def generate_college():
             "Quantum-resistant cryptography is essential.",
         ],
     }
-    
+
     facts = {}
     for category, base_facts in categories.items():
         facts[category] = []
         for i, fact in enumerate(base_facts):
-            facts[category].append({
-                "id": f"{category[:3]}_3{i+1:02d}",
-                "fact": fact,
-                "difficulty": "expert",
-                "keywords": category.split("_")
-            })
-    
+            facts[category].append(
+                {
+                    "id": f"{category[:3]}_3{i+1:02d}",
+                    "fact": fact,
+                    "difficulty": "expert",
+                    "keywords": category.split("_"),
+                }
+            )
+
     return facts
+
 
 def main():
     """Generate and save the knowledge base."""
     print("🔒 Generating 1000 cybersecurity facts...")
-    
+
     # Generate facts for each level
     all_facts = {
         "metadata": {
@@ -746,14 +759,14 @@ def main():
             "version": "1.0",
             "grade_levels": ["5th_grade", "middle_school", "high_school", "college"],
             "total_facts": 1000,
-            "last_updated": "2024-01-01"
+            "last_updated": "2024-01-01",
         },
         "5th_grade": generate_5th_grade(),
         "middle_school": generate_middle_school(),
         "high_school": generate_high_school(),
-        "college": generate_college()
+        "college": generate_college(),
     }
-    
+
     # Count facts
     total = 0
     for level, categories in all_facts.items():
@@ -762,17 +775,18 @@ def main():
         for category, cat_facts in categories.items():
             total += len(cat_facts)
             print(f"  {level} - {category}: {len(cat_facts)} facts")
-    
+
     print(f"\n✅ Total: {total} facts")
-    
+
     # Save to file
     output_path = Path("data/cybersecurity_facts.json")
-    with open(output_path, 'w') as f:
+    with open(output_path, "w") as f:
         json.dump(all_facts, f, indent=2)
-    
+
     file_size = output_path.stat().st_size / 1024  # KB
     print(f"💾 Saved to: {output_path} ({file_size:.1f} KB)")
-    print(f"⚡ Query time: <1 second (instant after load)")
+    print("⚡ Query time: <1 second (instant after load)")
+
 
 if __name__ == "__main__":
     main()

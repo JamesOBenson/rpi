@@ -23,7 +23,7 @@ import numpy as np
 
 PROJECT_ROOT = Path(__file__).parent.parent
 _LIB_PATH = PROJECT_ROOT / "lib" / "librnnoise.so"
-_FRAME = 480      # RNNoise frame size at 48 kHz
+_FRAME = 480  # RNNoise frame size at 48 kHz
 _SR48, _SR16 = 48000, 16000
 
 
@@ -60,8 +60,7 @@ def _decimate3(x48):
     and broke question endpointing."""
     n = len(x48) // 6 * 6
     spec = np.fft.rfft(x48[:n])
-    return (np.fft.irfft(spec[: n // 6 + 1], n=n // 3) / 3).astype(
-        np.float32)
+    return (np.fft.irfft(spec[: n // 6 + 1], n=n // 3) / 3).astype(np.float32)
 
 
 class NoiseSuppressedStream:
@@ -86,14 +85,16 @@ class NoiseSuppressedStream:
         x = data.flatten().astype(np.float32)
         self._raw.append(x)
         if len(x) % _FRAME:  # defensive; real chunks always align
-            x = np.concatenate([x, np.zeros(_FRAME - len(x) % _FRAME,
-                                            dtype=np.float32)])
+            x = np.concatenate(
+                [x, np.zeros(_FRAME - len(x) % _FRAME, dtype=np.float32)]
+            )
         y = np.empty_like(x)
         for i in range(0, len(x), _FRAME):
             self._lib.rnnoise_process_frame(
                 self._state,
-                y[i:i + _FRAME].ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
-                x[i:i + _FRAME].ctypes.data_as(ctypes.POINTER(ctypes.c_float)))
+                y[i : i + _FRAME].ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
+                x[i : i + _FRAME].ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
+            )
         out = _decimate3(y)
         return out.astype(np.float32).reshape(-1, 1), overflow
 
@@ -141,8 +142,9 @@ def denoise_16k(audio16: np.ndarray) -> np.ndarray:
         for i in range(0, len(x48), _FRAME):
             lib.rnnoise_process_frame(
                 state,
-                y[i:i + _FRAME].ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
-                x48[i:i + _FRAME].ctypes.data_as(ctypes.POINTER(ctypes.c_float)))
+                y[i : i + _FRAME].ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
+                x48[i : i + _FRAME].ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
+            )
         return _decimate3(y).astype(np.float32)
     finally:
         lib.rnnoise_destroy(state)

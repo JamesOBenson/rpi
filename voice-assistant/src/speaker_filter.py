@@ -25,24 +25,33 @@ import numpy as np
 class SpeakerFilter:
     SR = 16000
 
-    def __init__(self, model_path, threshold=0.75, min_keep=0.25,
-                 chunk_sec=1.0, hop_sec=0.5, num_threads=4):
+    def __init__(
+        self,
+        model_path,
+        threshold=0.75,
+        min_keep=0.25,
+        chunk_sec=1.0,
+        hop_sec=0.5,
+        num_threads=4,
+    ):
         import sherpa_onnx
+
         self.threshold = threshold
         self.min_keep = min_keep
         self.chunk_sec = chunk_sec
         self.hop_sec = hop_sec
         self.extractor = sherpa_onnx.SpeakerEmbeddingExtractor(
             sherpa_onnx.SpeakerEmbeddingExtractorConfig(
-                model=model_path, num_threads=num_threads))
+                model=model_path, num_threads=num_threads
+            )
+        )
 
     def _embed(self, audio):
         """L2-normalized 512-d embedding, or None if the audio is too short."""
         if audio is None or len(audio) < self.SR // 4:  # < 0.25s
             return None
         st = self.extractor.create_stream()
-        st.accept_waveform(self.SR,
-                           np.ascontiguousarray(audio, dtype=np.float32))
+        st.accept_waveform(self.SR, np.ascontiguousarray(audio, dtype=np.float32))
         e = np.asarray(self.extractor.compute(st), dtype=np.float32)
         n = np.linalg.norm(e)
         return e / n if n > 1e-6 else None
@@ -67,9 +76,9 @@ class SpeakerFilter:
         best, best_rms = None, -1.0
         hop = self.SR // 10  # 0.1s
         for i in range(0, len(a) - cn + 1, hop):
-            r = self._rms(a[i:i + cn])
+            r = self._rms(a[i : i + cn])
             if r > best_rms:
-                best, best_rms = a[i:i + cn], r
+                best, best_rms = a[i : i + cn], r
         return self._embed(best)
 
     def filter(self, audio, ref):
@@ -85,7 +94,7 @@ class SpeakerFilter:
         n = len(audio)
         sims = []
         for start in range(0, n - cn + 1, hn):
-            c = audio[start:start + cn]
+            c = audio[start : start + cn]
             if self._rms(c) < 0.01:  # silent chunk: no speaker in it
                 sims.append(0.0)
             else:
@@ -99,7 +108,7 @@ class SpeakerFilter:
             if j > 0:
                 s = max(s, sims[j - 1])
             if s >= self.threshold:
-                keep[j * hn:(j + 1) * hn] = True
+                keep[j * hn : (j + 1) * hn] = True
         ratio = float(keep.mean())
         if ratio < self.min_keep:
             return audio, f"fallback (kept {ratio:.0%})"

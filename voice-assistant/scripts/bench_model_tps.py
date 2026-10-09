@@ -41,7 +41,9 @@ Recent measurements on this Pi (for reference):
     of 4-thread load, so decode rates are thermally capped. If results look
     far off from these, check cooling before drawing conclusions.
 """
-import sys, time, statistics
+import sys
+import time
+import statistics
 from llama_cpp import Llama
 
 IM_START = "\u003c|im_start|>"
@@ -55,9 +57,11 @@ FACTS = [
     "Octopuses have blue blood because they use hemocyanin, which contains copper, instead of the iron in our blood.",
     "Blue light has a shorter wavelength than red light, so it scatters in all directions when sunlight hits the atmosphere.",
 ]
-SYSTEM = ("You are STEM Buddy, a friendly AI for 4th-5th graders.\n"
-          "Answer in 1-2 short sentences, simple words, under 40 words.\n"
-          "Use the facts below when they answer the question; ignore them otherwise.")
+SYSTEM = (
+    "You are STEM Buddy, a friendly AI for 4th-5th graders.\n"
+    "Answer in 1-2 short sentences, simple words, under 40 words.\n"
+    "Use the facts below when they answer the question; ignore them otherwise."
+)
 QUESTION = "why is the sky blue"
 
 
@@ -73,10 +77,7 @@ def build_prompt(model_name: str):
         )
         return prompt, ["\n\nQ:", "\n\nQuestion:", "Question:", "###"]
     user_msg = f"{SYSTEM}\nFacts:\n- {facts}\n\nQ: {QUESTION}"
-    prompt = (
-        f"{SOT}user\n{user_msg}\n{EOT}\n"
-        f"{SOT}model\n"
-    )
+    prompt = f"{SOT}user\n{user_msg}\n{EOT}\n" f"{SOT}model\n"
     return prompt, [EOT, SOT]
 
 
@@ -90,8 +91,9 @@ def main():
     prompt, stop = build_prompt(model_path)
 
     n_ctx = 512 if is_qwen else 1024
-    llm = Llama(model_path=model_path, n_ctx=n_ctx, n_threads=4,
-                n_gpu_layers=0, verbose=False)
+    llm = Llama(
+        model_path=model_path, n_ctx=n_ctx, n_threads=4, n_gpu_layers=0, verbose=False
+    )
     ntok = len(llm.tokenize(prompt.encode("utf-8"), add_bos=True))
     llm(prompt, max_tokens=1)  # warmup
 
@@ -102,16 +104,19 @@ def main():
         llm(prompt, max_tokens=1)
         times.append(time.time() - t0)
     med = statistics.median(times)
-    print(f"[{label}] prompt={ntok} tok | prefill median {med:.2f}s -> "
-          f"{ntok/med:.0f} t/s  (range {min(times):.2f}-{max(times):.2f})")
+    print(
+        f"[{label}] prompt={ntok} tok | prefill median {med:.2f}s -> "
+        f"{ntok/med:.0f} t/s  (range {min(times):.2f}-{max(times):.2f})"
+    )
 
     rates = []
     for _ in range(3):
         llm.reset()
-        first = None; toks = 0; t0 = time.time()
+        first = None
+        toks = 0
+        t0 = time.time()
         buffer = ""
-        for out in llm(prompt, max_tokens=100, temperature=0.3,
-                       stop=stop, stream=True):
+        for out in llm(prompt, max_tokens=100, temperature=0.3, stop=stop, stream=True):
             t = out["choices"][0].get("text")
             if not t:
                 continue
@@ -119,7 +124,7 @@ def main():
             # Skip think tags for Qwen models
             if is_qwen and THINK_END in buffer:
                 idx = buffer.find(THINK_END)
-                buffer = buffer[idx + len(THINK_END):]
+                buffer = buffer[idx + len(THINK_END) :]
             if buffer:
                 if first is None:
                     first = time.time() - t0
@@ -129,8 +134,10 @@ def main():
         if first is not None and total > first and toks > 1:
             rates.append((toks - 1) / (total - first))
     if rates:
-        print(f"[{label}] generation {statistics.median(rates):.1f} t/s "
-              f"(range {min(rates):.1f}-{max(rates):.1f})")
+        print(
+            f"[{label}] generation {statistics.median(rates):.1f} t/s "
+            f"(range {min(rates):.1f}-{max(rates):.1f})"
+        )
     else:
         print(f"[{label}] generation: no tokens generated")
 

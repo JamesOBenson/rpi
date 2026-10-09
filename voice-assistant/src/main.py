@@ -76,11 +76,11 @@ class STEMBuddy:
         stt_cfg = self.config.get("stt", {})
         self.stt_cfg = stt_cfg
         self.question_engine = stt_cfg.get("question_engine", "whisper").lower()
-        
+
         # Wake word detection
         ww_cfg = self.config.get("wake_word", {})
         ww_framework = ww_cfg.get("framework", "openwakeword").lower()
-        
+
         # Initialize wake word listener based on framework.
         # Both frameworks run inside WakeWordListener: openwakeword adds
         # its detector on top of the Vosk grammar one (whichever hears
@@ -102,7 +102,7 @@ class STEMBuddy:
         elif ww_framework == "openwakeword":
             print(f"✓ Using OpenWakeWord (wake words: {wake_words})")
         else:
-            print(f"✓ Using Vosk wake word detection")
+            print("✓ Using Vosk wake word detection")
         self.whisper = None
         self.hailo = None
         if self.question_engine in ("whisper", "hailo", "whisper-http"):
@@ -112,7 +112,9 @@ class STEMBuddy:
             if self.question_engine == "whisper-http":
                 # Use HTTP client - model stays warm in separate process
                 self.whisper = WhisperClient(
-                    server_url=stt_cfg.get("whisper_server_url", "http://127.0.0.1:8765"),
+                    server_url=stt_cfg.get(
+                        "whisper_server_url", "http://127.0.0.1:8765"
+                    ),
                     timeout=stt_cfg.get("whisper_timeout", 30.0),
                 )
             else:
@@ -126,22 +128,29 @@ class STEMBuddy:
             if self.question_engine == "hailo":
                 try:
                     from hailo_whisper_engine import HailoWhisperSTT
+
                     self.hailo = HailoWhisperSTT(
                         model_dir=stt_cfg.get("hailo_model_dir") or None
                     )
                     self.wake.hailo = self.hailo
                 except Exception as e:
-                    print(f"⚠ Hailo STT unavailable ({e}) - "
-                          f"using CPU Whisper instead")
+                    print(
+                        f"⚠ Hailo STT unavailable ({e}) - " f"using CPU Whisper instead"
+                    )
         # Speaker lock: after "buddy", keep only the voice that said it in
         # the question window; background voices (TV, other kids) are
         # zeroed out before STT. Contaminated references fall back to the
         # original audio, so it degrades to today's behavior at worst.
         self.spk_filter = None
         spk_cfg = stt_cfg.get("speaker_lock", {})
-        if spk_cfg.get("enabled", True) and self.question_engine in ("whisper", "hailo", "whisper-http"):
+        if spk_cfg.get("enabled", True) and self.question_engine in (
+            "whisper",
+            "hailo",
+            "whisper-http",
+        ):
             try:
                 from speaker_filter import SpeakerFilter
+
                 model_path = Path(spk_cfg.get("model", "models/spk/campplus_en.onnx"))
                 if not model_path.is_absolute():
                     model_path = Path(__file__).parent.parent / model_path
@@ -149,11 +158,14 @@ class STEMBuddy:
                     str(model_path),
                     threshold=spk_cfg.get("threshold", 0.75),
                     min_keep=spk_cfg.get("min_keep", 0.25),
-                    num_threads=spk_cfg.get("threads", 4))
-                console.print(f"[green]✓ Speaker lock on (same-speaker ≥ {self.spk_filter.threshold})[/green]")
+                    num_threads=spk_cfg.get("threads", 4),
+                )
+                console.print(
+                    f"[green]✓ Speaker lock on (same-speaker ≥ {self.spk_filter.threshold})[/green]"
+                )
             except Exception as e:
                 console.print(f"[yellow]⚠ Speaker lock unavailable ({e})[/yellow]")
-        
+
         # Initialize TTS (direct or HTTP mode)
         tts_cfg = self.config.get("tts", {})
         tts_mode = tts_cfg.get("mode", "direct").lower()
@@ -165,21 +177,19 @@ class STEMBuddy:
                 )
                 console.print("[green]✓ TTS HTTP client ready[/green]")
             except Exception as e:
-                console.print(f"[yellow]⚠ TTS server unavailable ({e}) - falling back to direct[/yellow]")
+                console.print(
+                    f"[yellow]⚠ TTS server unavailable ({e}) - falling back to direct[/yellow]"
+                )
                 self.tts = TextToSpeech()
         else:
             self.tts = TextToSpeech()
         self.llm = LocalLLM(
             model_path=llm_cfg.get("model"),
             n_ctx=llm_cfg.get("context_window", 512),
-            n_threads=llm_cfg.get("threads", 8)
+            n_threads=llm_cfg.get("threads", 8),
         )
-        self.knowledge_base = KnowledgeBase(
-            max_distance=self.similarity_threshold
-        )
-        self.interrupt = InterruptHandler(
-            button_pin=gpio_cfg.get("button_pin", 4)
-        )
+        self.knowledge_base = KnowledgeBase(max_distance=self.similarity_threshold)
+        self.interrupt = InterruptHandler(button_pin=gpio_cfg.get("button_pin", 4))
 
         # Wire handlers
         self.interrupt.setup_button(self._on_button)
@@ -188,12 +198,14 @@ class STEMBuddy:
 
     async def start(self):
         """Start the voice assistant."""
-        console.print(Panel(
-            "[bold green]STEM BUDDY is starting![/bold green]\n"
-            f"Say [bold]'{self.wake_word.capitalize()}'[/bold] then ask your question\n"
-            "Say [bold]'STOP!'[/bold] to interrupt",
-            title="[bold blue]STEM Buddy[/bold blue]"
-        ))
+        console.print(
+            Panel(
+                "[bold green]STEM BUDDY is starting![/bold green]\n"
+                f"Say [bold]'{self.wake_word.capitalize()}'[/bold] then ask your question\n"
+                "Say [bold]'STOP!'[/bold] to interrupt",
+                title="[bold blue]STEM Buddy[/bold blue]",
+            )
+        )
 
         # Check for audio devices
         self._check_audio_devices()
@@ -212,6 +224,7 @@ class STEMBuddy:
         audio_cfg = self.config.get("audio", {})
         try:
             from audio_chain import SignalChain, HighPass, AGC
+
             hp_hz = float(audio_cfg.get("highpass_hz", 100))
             hp = HighPass(sr=self.wake.sample_rate, fc=hp_hz)
             agc = AGC() if audio_cfg.get("agc", True) else None
@@ -222,18 +235,18 @@ class STEMBuddy:
         if ns:
             try:
                 from noise_suppressor import NoiseSuppressedStream
-                base = sd.InputStream(
-                    samplerate=48000, channels=1, dtype="float32"
-                )
+
+                base = sd.InputStream(samplerate=48000, channels=1, dtype="float32")
                 base.start()
-                self.stream = SignalChain(
-                    NoiseSuppressedStream(base), hp, agc)
+                self.stream = SignalChain(NoiseSuppressedStream(base), hp, agc)
                 console.print(
                     f"[green]✓ RNNoise + highpass {hp_hz:.0f} Hz"
                     + (" + AGC[/green]" if agc else "[/green]")
                 )
             except Exception as e:
-                console.print(f"[yellow]⚠ Noise suppression unavailable ({e}) - raw mic[/yellow]")
+                console.print(
+                    f"[yellow]⚠ Noise suppression unavailable ({e}) - raw mic[/yellow]"
+                )
                 ns = False
         if not ns:
             base = sd.InputStream(
@@ -261,10 +274,8 @@ class STEMBuddy:
                     if self.spk_filter is not None:
                         # Speaker lock: keep only the voice that said
                         # "buddy"; the rest (TV, other kids) goes to zero.
-                        ref = self.spk_filter.reference(
-                            self.wake.last_wake_audio)
-                        q_audio, spk_info = self.spk_filter.filter(
-                            q_audio, ref)
+                        ref = self.spk_filter.reference(self.wake.last_wake_audio)
+                        q_audio, spk_info = self.spk_filter.filter(q_audio, ref)
                         print(f"  (speaker lock: {spk_info})")
                     if self.stt_cfg.get("debug_audio"):
                         self._save_debug_audio(q_audio)
@@ -273,8 +284,7 @@ class STEMBuddy:
                         if raw_last is not None:
                             mic = raw_last(len(q_audio) / 16000 + 0.5)
                             if len(mic):
-                                self._save_debug_audio(
-                                    mic, "-mic", samplerate=48000)
+                                self._save_debug_audio(mic, "-mic", samplerate=48000)
                 if not question and self.whisper is not None and q_audio is not None:
                     # Separate-utterance case: wake word was its own sentence,
                     # so the question audio wasn't transcribed yet.
@@ -297,10 +307,13 @@ class STEMBuddy:
                             question_source = "whisper"
                 else:
                     question_source = self.wake.last_source
-                if question and question_source == "hailo" \
-                        and self.whisper is not None and q_audio is not None \
-                        and (len(q_audio) < 3.5 * 16000
-                             or is_nonspeech(question)):
+                if (
+                    question
+                    and question_source == "hailo"
+                    and self.whisper is not None
+                    and q_audio is not None
+                    and (len(q_audio) < 3.5 * 16000 or is_nonspeech(question))
+                ):
                     # Short-window re-judge: the Hailo 5s model is
                     # out-of-distribution on <~3s of speech and garbles it
                     # ("black holes" -> "black horse"). CPU Whisper handles
@@ -360,9 +373,19 @@ class STEMBuddy:
             has_input = any(d.get("max_input_channels", 0) > 0 for d in devices)
             has_output = any(d.get("max_output_channels", 0) > 0 for d in devices)
             if not has_input:
-                console.print(Panel("[red]No microphone detected![/red]\nPlug in a USB microphone and restart.", title="⚠ Audio"))
+                console.print(
+                    Panel(
+                        "[red]No microphone detected![/red]\nPlug in a USB microphone and restart.",
+                        title="⚠ Audio",
+                    )
+                )
             if not has_output:
-                console.print(Panel("[red]No speakers detected![/red]\nPlug in USB speakers and restart.", title="⚠ Audio"))
+                console.print(
+                    Panel(
+                        "[red]No speakers detected![/red]\nPlug in USB speakers and restart.",
+                        title="⚠ Audio",
+                    )
+                )
             if has_input and has_output:
                 console.print("[green]✓ Audio devices found[/green]")
         except Exception as e:
@@ -379,8 +402,20 @@ class STEMBuddy:
         if len(question.split()) > 5:
             return False
         q = question.lower()
-        question_words = ("why", "how", "what", "when", "where", "who",
-                          "do", "does", "can", "is", "are", "tell me")
+        question_words = (
+            "why",
+            "how",
+            "what",
+            "when",
+            "where",
+            "who",
+            "do",
+            "does",
+            "can",
+            "is",
+            "are",
+            "tell me",
+        )
         if any(w in q for w in question_words):
             return False
         try:
@@ -403,13 +438,19 @@ class STEMBuddy:
             self.wake.hailo = None
             return ""
 
-    def _save_debug_audio(self, audio: np.ndarray, suffix: str = "",
-                          samplerate: int = 16000):
+    def _save_debug_audio(
+        self, audio: np.ndarray, suffix: str = "", samplerate: int = 16000
+    ):
         """Save the captured question WAV for debugging (stt.debug_audio: true)."""
         try:
             import wave
-            path = Path(__file__).parent.parent / "logs" / "audio" / \
-                f"q-{time.strftime('%Y%m%d-%H%M%S')}{suffix}.wav"
+
+            path = (
+                Path(__file__).parent.parent
+                / "logs"
+                / "audio"
+                / f"q-{time.strftime('%Y%m%d-%H%M%S')}{suffix}.wav"
+            )
             path.parent.mkdir(parents=True, exist_ok=True)
             pcm = (np.clip(audio, -1.0, 1.0) * 32767).astype(np.int16)
             with wave.open(str(path), "wb") as w:
@@ -417,13 +458,16 @@ class STEMBuddy:
                 w.setsampwidth(2)
                 w.setframerate(samplerate)
                 w.writeframes(pcm.tobytes())
-            print(f"  \U0001f399 debug audio saved: {path.name} "
-                  f"({len(audio)/samplerate:.1f}s, peak={float(np.abs(audio).max()):.3f})")
+            print(
+                f"  \U0001f399 debug audio saved: {path.name} "
+                f"({len(audio)/samplerate:.1f}s, peak={float(np.abs(audio).max()):.3f})"
+            )
         except Exception as e:
             print(f"  (debug audio save failed: {e})")
 
-    def _normalize(self, audio: np.ndarray, target_peak: float = 0.9,
-                   max_gain: float = 6.0) -> np.ndarray:
+    def _normalize(
+        self, audio: np.ndarray, target_peak: float = 0.9, max_gain: float = 6.0
+    ) -> np.ndarray:
         """Raise quiet question audio to a comfortable level for Whisper.
 
         Bounded gain (max 6x) helps quiet speech without turning room
@@ -444,8 +488,10 @@ class STEMBuddy:
         n = len(audio)
         if n > 2 * sr:  # >2s: there is a wake word to skip past
             frame = sr // 10  # 0.1s
-            env = [float(np.abs(audio[i * frame:(i + 1) * frame]).max())
-                   for i in range(min(40, n // frame))]
+            env = [
+                float(np.abs(audio[i * frame : (i + 1) * frame]).max())
+                for i in range(min(40, n // frame))
+            ]
             for i in range(len(env) - 1):
                 if env[i] > 0.15 and env[i + 1] < 0.10:  # voice -> gap
                     start = (i + 1) * frame
@@ -468,11 +514,12 @@ class STEMBuddy:
         while True:
             m = re.match(
                 r"^(?:buddy|buddies|button|body|hey|hi|hello|can you|could you|please)[,.!?;\s]*",
-                t, re.IGNORECASE
+                t,
+                re.IGNORECASE,
             )
             if not m or m.end() == 0:
                 return t.strip()
-            t = t[m.end():]
+            t = t[m.end() :]
 
     def _process_question(self, question: str):
         """Process a question: stream RAG+LLM sentences, speak each as ready."""
@@ -482,7 +529,9 @@ class STEMBuddy:
             # repeat instead of answering nonsense ("I'm not sure" is a dead
             # end for a 9-year-old).
             self.led.set_state(LEDState.SPEAKING)
-            console.print("[yellow]▸ Sorry, I didn't catch that! Can you say it again?[/yellow]")
+            console.print(
+                "[yellow]▸ Sorry, I didn't catch that! Can you say it again?[/yellow]"
+            )
             self.tts.speak("Sorry, I didn't catch that! Can you say it again?")
             self.led.set_state(LEDState.IDLE)
             return
@@ -549,7 +598,7 @@ class STEMBuddy:
         watcher = threading.Thread(
             target=self.wake.watch_for_stop,
             args=(self.stream, stop_event, watching),
-            daemon=True
+            daemon=True,
         )
         watcher.start()
 
@@ -595,7 +644,7 @@ class STEMBuddy:
             cut = text[:250]
             last_period = cut.rfind(". ")
             if last_period > 100:
-                text = cut[:last_period + 1]
+                text = cut[: last_period + 1]
             else:
                 text = cut + "..."
         return text
@@ -612,12 +661,14 @@ class STEMBuddy:
         console.print("\n[bold yellow]Shutting down...[/bold yellow]")
         self.running = False
         self._close_stream()
+
         # Failsafe: if the main thread can't finish cleanly within 3s
         # (e.g. blocked in a C call), force-exit so systemd never has to
         # SIGKILL us and stop/restart stays fast.
         def _force_exit():
             time.sleep(3)
             os._exit(0)
+
         threading.Thread(target=_force_exit, daemon=True).start()
 
     def stop(self):

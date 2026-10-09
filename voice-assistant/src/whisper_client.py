@@ -7,7 +7,6 @@ Drop-in replacement for WhisperSTT.
 """
 
 import base64
-import json
 import time
 from pathlib import Path
 
@@ -28,7 +27,7 @@ class WhisperClient:
     ):
         """
         Initialize Whisper HTTP client.
-        
+
         Args:
             server_url: URL of the Whisper server
             timeout: Request timeout in seconds
@@ -56,39 +55,41 @@ class WhisperClient:
     def transcribe(self, audio: np.ndarray) -> str:
         """
         Transcribe 16kHz mono float32 audio via HTTP.
-        
+
         Args:
             audio: NumPy array (float32, -1.0..1.0)
-            
+
         Returns:
             Transcribed text
         """
         if audio is None or len(audio) < SAMPLE_RATE // 10:
             return ""
-        
+
         t0 = time.time()
-        
+
         # Encode audio as base64
         audio_b64 = base64.b64encode(audio.tobytes()).decode("ascii")
-        
+
         try:
             resp = requests.post(
                 f"{self.server_url}/transcribe",
                 json={"audio": audio_b64},
                 timeout=self.timeout,
             )
-            
+
             if resp.status_code != 200:
                 error = resp.json().get("error", "Unknown error")
                 print(f"  ✗ Whisper error: {error}")
                 return ""
-            
+
             data = resp.json()
             text = data.get("text", "")
             n_sec = len(audio) / SAMPLE_RATE
-            print(f"  ⏱ whisper-http: {n_sec:.1f}s audio -> {time.time() - t0:.2f}s -> {text!r}")
+            print(
+                f"  ⏱ whisper-http: {n_sec:.1f}s audio -> {time.time() - t0:.2f}s -> {text!r}"
+            )
             return text
-            
+
         except requests.RequestException as e:
             print(f"  ✗ Whisper request failed: {e}")
             return ""
@@ -97,12 +98,12 @@ class WhisperClient:
 # Test
 if __name__ == "__main__":
     print("Testing Whisper HTTP client...")
-    
+
     # Create test audio (sine wave)
     duration = 2.0
     t = np.linspace(0, duration, int(SAMPLE_RATE * duration))
     audio = 0.3 * np.sin(2 * np.pi * 440 * t).astype(np.float32)
-    
+
     try:
         client = WhisperClient()
         text = client.transcribe(audio)

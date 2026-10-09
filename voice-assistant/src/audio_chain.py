@@ -14,6 +14,7 @@ gain pulls the signal toward the target RMS (a kid's quiet question at
 0.05 RMS becomes ~0.12 RMS); when the room is quiet the gain releases
 back to 1.0 so the noise floor is never amplified. Max gain is capped.
 """
+
 import numpy as np
 from scipy.signal import butter, lfilter
 
@@ -43,9 +44,14 @@ class HighPass:
 class AGC:
     """RMS-targeted gain, noise-gated, smoothed over ~100 ms chunks."""
 
-    def __init__(self, target: float = 0.12, max_gain: float = 6.0,
-                 noise_floor: float = 0.02, attack: float = 0.25,
-                 release: float = 0.15):
+    def __init__(
+        self,
+        target: float = 0.12,
+        max_gain: float = 6.0,
+        noise_floor: float = 0.02,
+        attack: float = 0.25,
+        release: float = 0.15,
+    ):
         self.target = target
         self.max_gain = max_gain
         self.floor = noise_floor

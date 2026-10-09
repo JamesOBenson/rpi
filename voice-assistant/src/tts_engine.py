@@ -28,11 +28,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 class TextToSpeech:
     """Offline TTS using Piper."""
 
-    def __init__(
-        self,
-        voice_model: str = None,
-        speed: float = 1.0
-    ):
+    def __init__(self, voice_model: str = None, speed: float = 1.0):
         """
         Initialize TTS engine.
 
@@ -64,6 +60,7 @@ class TextToSpeech:
         # Preferred: in-process Piper (model loaded once, ~0s per sentence)
         try:
             from piper import PiperVoice
+
             self._voice = PiperVoice.load(str(self.model_path))
             print(f"✓ TTS ready (voice: {self.model_path.name}, in-process)")
             self.available = True
@@ -74,8 +71,10 @@ class TextToSpeech:
                 print(f"   Python API error: {e}")
                 self.available = False
             else:
-                print(f"⚠️  Piper Python API unavailable ({e}); "
-                      f"using slow subprocess mode (~2.5s per sentence)")
+                print(
+                    f"⚠️  Piper Python API unavailable ({e}); "
+                    f"using slow subprocess mode (~2.5s per sentence)"
+                )
                 self.available = True
 
     def synthesize(self, text: str) -> Optional[str]:
@@ -125,7 +124,7 @@ class TextToSpeech:
                 [self.piper_binary, "-m", str(self.model_path), "-f", output_path],
                 input=text.encode("utf-8"),
                 capture_output=True,
-                timeout=60
+                timeout=60,
             )
 
             if result.returncode != 0 or not Path(output_path).exists():
@@ -152,7 +151,7 @@ class TextToSpeech:
             print(f"🔊 [no TTS] {text}")
             return
 
-        print(f"🔊 Speaking...")
+        print("🔊 Speaking...")
         path = self.synthesize(text)
         if path is None:
             return
@@ -170,6 +169,7 @@ class TextToSpeech:
         """Play a WAV file, checking for interrupts each tick."""
         import time
         import threading
+
         try:
             with wave.open(audio_path, "rb") as wf:
                 frames = wf.readframes(wf.getnframes())
