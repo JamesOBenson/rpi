@@ -648,7 +648,15 @@ class WakeWordListener:
                         self._cap = []
                         break
 
-            if self.wake_rec is not None and state == "idle" and \
+            # Grammar wake branch is FALLBACK ONLY: when OpenWakeWord is
+            # loaded it is the sole wake judge. A 2-word grammar recognizer
+            # has only 'buddy' to choose from, so it 'hears' buddy in
+            # ambient noise with conf 1.00 - conf cannot separate real
+            # from false (observed: 4 false fires at 0.60-1.00, real
+            # wakes at 0.74-1.00). OWW's score can (0.80-0.97 real vs
+            # 0.51 false). Vosk still does question endpointing below.
+            if self.wake_rec is not None and self.oww_model is None \
+                    and state == "idle" and \
                     now >= self.muted_until and \
                     now - self._last_wake_any >= self.wake_gap:
                 # Grammar recognizer endpointing is independent of rec's.
