@@ -9,7 +9,7 @@ cd "$SCRIPT_DIR"
 
 PORT=8765
 MODEL="small.en"
-PROMPT="STEM and cybersecurity questions for kids. Topics: passwords, phishing, scams, black holes, sky, rockets, electricity, atoms, viruses, hacking."
+PROMPT="STEM and cybersecurity questions for kids. Topics: passwords, phishing, scams, black holes, sky, rockets, electricity, atoms, viruses, hacking. The user asks questions: What is a virus? What is malware?"
 
 echo "Starting Whisper HTTP server..."
 echo "  Model: $MODEL"
