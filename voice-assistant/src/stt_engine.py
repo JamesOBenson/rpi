@@ -591,6 +591,13 @@ class WakeWordListener:
             # at the loop bottom it was unreachable while rec stayed silent.
             if state == "question" and (now - state_start) > self.question_timeout:
                 print("  (no question heard - back to listening for 'Buddy')")
+                # Diagnostic: peak level of the last 6s of mic audio.
+                # If this prints ~2% or below, the speaker's voice isn't
+                # reaching the endpointer - next step is the AGC floor.
+                _ring = np.concatenate(list(self._ring)[-60:])
+                print(f"  (diagnostic: ring peak "
+                      f"{float(np.abs(_ring).max()) * 100:.1f}% "
+                      f"rms {float(np.sqrt(np.mean(np.square(_ring)))) * 100:.1f}%)")
                 self._q_sox_kill()
                 state = "idle"
                 state_start = now
@@ -709,12 +716,13 @@ class WakeWordListener:
                 # sox endpoint (ported from whisplay-ai-chatbot, which the
                 # user A/B-tested as "hears everything perfectly"): sox
                 # exits 0.7s after the signal drops below the threshold.
-                # 4% is tuned for the current room (measured 2024-10-07):
-                # noise floor peaks 1-1.3%, voice peaks 7.6-14.8% - the
-                # original 24% (chatbot room) and 10% both missed the
-                # user's normal speech here. A 0.7s-sustained drop is
-                # required to stop, so brief noise spikes above 4% at
-                # most cost 0.7s, never an endpoint mid-question.
+                # 2% start / 2% end (was 4%): the kid's loud questions
+                # peaked 7.6-14.8%, but normal conversational volume from
+                # across the room sits near 2-4% and the 4% trigger
+                # missed it ("no question heard" with wake firing fine).
+                # Room noise peaks 1-1.3%, and a 0.7s-sustained drop is
+                # required to stop, so brief noise spikes at most cost
+                # 0.7s, never an endpoint mid-question.
                 # The stream keeps feeding the ring while sox records, so a
                 # short capture (noise blip, or a one-breath question sox
                 # clipped at startup) falls back to the ring audio.
@@ -733,7 +741,7 @@ class WakeWordListener:
                              "-e", "signed-integer", "-b", "16", "-",
                              "-t", "wav", "-c", "1", "-r", "16000",
                              self._q_sox_path,
-                             "silence", "1", "0.1", "4%", "1", "0.7", "4%"],
+                             "silence", "1", "0.1", "2%", "1", "0.7", "2%"],
                             stdin=subprocess.PIPE,
                             stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL)
