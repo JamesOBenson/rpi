@@ -533,6 +533,24 @@ class WakeWordListener:
             pass
         self._q_dbg = []
 
+    def _play_wake_chirp(self, reason=""):
+        """One short tone at the instant the wake word is heard: tells the
+        kid 'I heard you, go ahead' while the question window opens.
+        Distinct from the three-tone confirmed chime. Short enough (120ms)
+        that VAD drops it from the capture's head; the speakerphone's
+        firmware AEC cancels it from the mic (loopback-verified), so gain
+        is set for AUDIBILITY, not feedback avoidance: -12 dB is clearly
+        audible on the small USB speaker, -30 dB was not."""
+        print(f"[chirp] {time.strftime('%H:%M:%S')} {reason}", flush=True)
+        try:
+            subprocess.Popen(
+                ["sox", "-q", "-n", "-t", "alsa", "default",
+                 "synth", "0.12", "sine", "1000", "vol", "0.35",
+                 "fade", "q", "0.02", "0.10", "0.03", "gain", "-12"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
     def _play_wake_chime(self, reason=""):
         """The whisplay-ai-chatbot wakeup chime, verbatim: sox synth three
         rising tones (720/980/1320 Hz) at -30 dB straight to ALSA - no
@@ -555,8 +573,9 @@ class WakeWordListener:
             pass
 
     def wait_for_question(self, stream):
-        """Wake word + question capture, with the chime moved to the
-        end: it plays only when a question is actually confirmed. A
+        """Wake word + question capture. A short chirp plays the moment a
+        trusted wake fires (go-ahead feedback); the three-tone chime plays
+        at the end, only when a question is actually confirmed. A
         noise-triggered wake with no speech after it gets logged, not
         chimed - that was the source of the random chimes (Vosk's
         2-word grammar 'hears' buddy in ambient noise at conf 1.00)."""
@@ -641,6 +660,7 @@ class WakeWordListener:
                         0, False, False
                     self._q_sox_kill()
                     self._q_sox_fails = 0
+                    self._play_wake_chirp(self._wake_reason)
                     break
 
             if self.porcupine is not None and state == "idle" and \
@@ -668,6 +688,7 @@ class WakeWordListener:
                         state_start = now
                         self._q_flip = now
                         self._cap = []
+                        self._play_wake_chirp("porcupine")
                         break
 
             # Grammar wake branch. Known weakness: a 2-word grammar has
@@ -712,6 +733,12 @@ class WakeWordListener:
                                 0, False, False
                             self._q_sox_kill()
                             self._q_sox_fails = 0
+                            # Chirp only on trusted wakes: real wakes
+                            # today scored >= 0.82, false fires <= 0.76
+                            # (see the grammar-branch comment above).
+                            if conf >= 0.8:
+                                self._play_wake_chirp(
+                                    f"vosk conf={conf:.2f}")
 
             if self.hybrid and self.wake_rec is not None and state == "question":
                 # sox endpoint (ported from whisplay-ai-chatbot, which the
