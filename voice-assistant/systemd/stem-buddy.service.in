@@ -6,6 +6,7 @@ After=network.target sound.target
 User=__USER__
 WorkingDirectory=__DIR__
 Environment=PYTHONPATH=__DIR__
+ExecStartPre=__DIR__/scripts/setup_audio.sh
 ExecStart=__DIR__/venv/bin/python src/main.py
 Restart=always
 

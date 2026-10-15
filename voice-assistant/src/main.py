@@ -390,10 +390,10 @@ class STEMBuddy:
         # forever, CPU ~0%); nothing else notices. Hard-exit so systemd
         # (Restart=always) respawns us with a fresh mic handle.
         while True:
-            time.sleep(5)
-            if self._mic_expected and time.monotonic() - self._audio_ts > 45:
+            time.sleep(2)  # check every 2s instead of 5s
+            if self._mic_expected and time.monotonic() - self._audio_ts > 12:
                 console.print(
-                    "[red]⚠ No mic frames for 45s - stream wedged, exiting for restart[/red]"
+                    "[red]⚠ No mic frames for 12s - stream wedged, exiting for restart[/red]"
                 )
                 os._exit(3)
 
