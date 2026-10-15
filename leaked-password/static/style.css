@@ -1,0 +1,244 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+    padding: 20px;
+}
+
+.container {
+    max-width: 600px;
+    margin: 0 auto;
+    background: white;
+    border-radius: 16px;
+    padding: 40px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+}
+
+h1 {
+    text-align: center;
+    color: #1f2937;
+    margin-bottom: 8px;
+    font-size: 2rem;
+}
+
+.subtitle {
+    text-align: center;
+    color: #6b7280;
+    margin-bottom: 32px;
+    font-size: 0.9rem;
+}
+
+.input-section {
+    margin-bottom: 32px;
+}
+
+label {
+    display: block;
+    font-weight: 600;
+    color: #374151;
+    margin-bottom: 8px;
+}
+
+.input-group {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+#password {
+    flex: 1;
+    padding: 12px 16px;
+    font-size: 1rem;
+    border: 2px solid #d1d5db;
+    border-radius: 8px;
+    transition: border-color 0.2s;
+}
+
+#password:focus {
+    outline: none;
+    border-color: #667eea;
+}
+
+#toggle-visibility {
+    padding: 12px 16px;
+    background: #f3f4f6;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 1rem;
+    transition: background 0.2s;
+}
+
+#toggle-visibility:hover {
+    background: #e5e7eb;
+}
+
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 20px;
+    cursor: pointer;
+    font-weight: normal;
+    color: #4b5563;
+}
+
+.checkbox-label input {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+}
+
+#analyze-btn {
+    width: 100%;
+    padding: 14px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+#analyze-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
+}
+
+#analyze-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.results {
+    animation: fadeIn 0.3s ease-in;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.strength-meter {
+    margin-bottom: 24px;
+}
+
+.meter-bar {
+    height: 12px;
+    background: #e5e7eb;
+    border-radius: 6px;
+    overflow: hidden;
+    margin-bottom: 8px;
+}
+
+.meter-fill {
+    height: 100%;
+    transition: width 0.5s ease-out, background-color 0.3s;
+}
+
+.strength-text {
+    text-align: center;
+    font-size: 1.5rem;
+    font-weight: 700;
+}
+
+.metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.metric {
+    text-align: center;
+    padding: 16px;
+    background: #f9fafb;
+    border-radius: 8px;
+}
+
+.metric-label {
+    display: block;
+    font-size: 0.75rem;
+    color: #6b7280;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+}
+
+.metric-value {
+    display: block;
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #1f2937;
+}
+
+.metric-unit {
+    display: block;
+    font-size: 0.75rem;
+    color: #9ca3af;
+    margin-top: 2px;
+}
+
+.alert {
+    padding: 16px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    font-weight: 500;
+}
+
+.alert.breach {
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    color: #dc2626;
+}
+
+.issues, .recommendations {
+    margin-top: 20px;
+    padding: 20px;
+    background: #fef3c7;
+    border-radius: 8px;
+    border-left: 4px solid #f59e0b;
+}
+
+.issues h3, .recommendations h3 {
+    color: #92400e;
+    font-size: 0.9rem;
+    margin-bottom: 12px;
+}
+
+.issues ul, .recommendations ul {
+    list-style: none;
+    padding: 0;
+}
+
+.issues li, .recommendations li {
+    padding: 8px 0;
+    color: #78350f;
+    border-bottom: 1px solid #fde68a;
+}
+
+.issues li:last-child, .recommendations li:last-child {
+    border-bottom: none;
+}
+
+@media (max-width: 640px) {
+    .container {
+        padding: 24px;
+    }
+    
+    .metrics-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    h1 {
+        font-size: 1.5rem;
+    }
+}

@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Password Security Checker</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>🔒 Password Security Checker</h1>
+        <p class="subtitle">100% offline analysis - your password never leaves this page</p>
+        
+        <div class="input-section">
+            <label for="password">Enter password to analyze:</label>
+            <div class="input-group">
+                <input type="password" id="password" placeholder="Type or paste your password..." autocomplete="off">
+                <button id="toggle-visibility" type="button">👁️</button>
+            </div>
+            <label class="checkbox-label">
+                <input type="checkbox" id="check-hibp">
+                <span>Check against HIBP breach database (online)</span>
+            </label>
+            <button id="analyze-btn">Analyze Password</button>
+        </div>
+        
+        <div id="results" class="results" style="display: none;">
+            <div class="strength-meter">
+                <div class="meter-bar" id="meter-bar">
+                    <div class="meter-fill" id="meter-fill"></div>
+                </div>
+                <div class="strength-text" id="strength-text">--</div>
+            </div>
+            
+            <div class="metrics-grid">
+                <div class="metric">
+                    <span class="metric-label">Length</span>
+                    <span class="metric-value" id="length-value">--</span>
+                    <span class="metric-unit">characters</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Entropy</span>
+                    <span class="metric-value" id="entropy-value">--</span>
+                    <span class="metric-unit">bits</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Crack Time</span>
+                    <span class="metric-value" id="crack-time">--</span>
+                </div>
+            </div>
+            
+            <div id="breach-alert" class="alert breach" style="display: none;">
+                ⚠️ <strong>BREACHED:</strong> Found in <span id="breach-count">0</span> data breaches
+            </div>
+            
+            <div id="issues" class="issues" style="display: none;">
+                <h3>Issues Found:</h3>
+                <ul id="issues-list"></ul>
+            </div>
+            
+            <div id="recommendations" class="recommendations" style="display: none;">
+                <h3>Recommendations:</h3>
+                <ul id="recommendations-list"></ul>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        const passwordInput = document.getElementById('password');
+        const toggleBtn = document.getElementById('toggle-visibility');
+        const analyzeBtn = document.getElementById('analyze-btn');
+        const checkHibp = document.getElementById('check-hibp');
+        const results = document.getElementById('results');
+        
+        // Toggle password visibility
+        toggleBtn.addEventListener('click', () => {
+            const type = passwordInput.type === 'password' ? 'text' : 'password';
+            passwordInput.type = type;
+            toggleBtn.textContent = type === 'password' ? '👁️' : '🙈';
+        });
+        
+        // Analyze password
+        analyzeBtn.addEventListener('click', async () => {
+            const password = passwordInput.value;
+            if (!password) {
+                alert('Please enter a password');
+                return;
+            }
+            
+            analyzeBtn.disabled = true;
+            analyzeBtn.textContent = 'Analyzing...';
+            
+            try {
+                const response = await fetch('/api/check', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        password: password,
+                        check_online: checkHibp.checked
+                    })
+                });
+                
+                const data = await response.json();
+                displayResults(data);
+            } catch (error) {
+                alert('Error analyzing password: ' + error.message);
+            } finally {
+                analyzeBtn.disabled = false;
+                analyzeBtn.textContent = 'Analyze Password';
+            }
+        });
+        
+        function displayResults(data) {
+            results.style.display = 'block';
+            
+            // Strength meter
+            const strengthText = document.getElementById('strength-text');
+            const meterFill = document.getElementById('meter-fill');
+            const strengthColors = {
+                'weak': { text: '🔴 WEAK', color: '#ef4444', width: '25%' },
+                'moderate': { text: '🟡 MODERATE', color: '#f59e0b', width: '50%' },
+                'good': { text: '🟢 GOOD', color: '#10b981', width: '75%' },
+                'strong': { text: '🟢 STRONG', color: '#059669', width: '100%' }
+            };
+            const strength = strengthColors[data.strength] || strengthColors.weak;
+            strengthText.textContent = strength.text;
+            meterFill.style.width = strength.width;
+            meterFill.style.backgroundColor = strength.color;
+            
+            // Metrics
+            document.getElementById('length-value').textContent = data.length;
+            document.getElementById('entropy-value').textContent = data.entropy;
+            document.getElementById('crack-time').textContent = data.crack_time;
+            
+            // Breach alert
+            const breachAlert = document.getElementById('breach-alert');
+            if (data.breached) {
+                breachAlert.style.display = 'block';
+                document.getElementById('breach-count').textContent = data.breach_count.toLocaleString();
+            } else {
+                breachAlert.style.display = 'none';
+            }
+            
+            // Issues
+            const issuesDiv = document.getElementById('issues');
+            const issuesList = document.getElementById('issues-list');
+            if (data.is_common || data.patterns.length > 0) {
+                issuesDiv.style.display = 'block';
+                let items = [];
+                if (data.is_common) items.push('Common password detected');
+                items.push(...data.patterns);
+                issuesList.innerHTML = items.map(item => `<li>${item}</li>`).join('');
+            } else {
+                issuesDiv.style.display = 'none';
+            }
+            
+            // Recommendations
+            const recsDiv = document.getElementById('recommendations');
+            const recsList = document.getElementById('recommendations-list');
+            if (data.strength === 'weak' || data.strength === 'moderate') {
+                recsDiv.style.display = 'block';
+                let recs = [];
+                if (data.length < 12) recs.push('Use at least 12 characters');
+                if (data.is_common) recs.push('Avoid common passwords');
+                if (data.patterns.length > 0) recs.push('Remove predictable patterns');
+                recs.push('Use a passphrase (4+ random words)');
+                recsList.innerHTML = recs.map(rec => `<li>${rec}</li>`).join('');
+            } else {
+                recsDiv.style.display = 'none';
+            }
+        }
+    </script>
+</body>
+</html>

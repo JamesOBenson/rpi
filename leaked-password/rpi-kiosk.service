@@ -1,0 +1,15 @@
+[Unit]
+Description=Kiosk session (fluxbox + surf)
+After=xorg.service
+Requires=xorg.service
+
+[Service]
+User=rpi
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/rpi/.Xauthority
+ExecStart=/usr/bin/startfluxbox
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

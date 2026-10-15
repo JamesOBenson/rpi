@@ -1,0 +1,4 @@
+#!/bin/sh
+# Kiosk startup: open the password checker fullscreen (zoom 2), then run fluxbox
+surf -f -z 2 http://localhost:5000 &
+exec fluxbox

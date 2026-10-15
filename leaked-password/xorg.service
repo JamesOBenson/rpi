@@ -1,0 +1,8 @@
+[Unit]
+Description=X.Org server (kiosk)
+After=network.target
+
+[Service]
+ExecStart=/usr/lib/xorg/Xorg :0 vt1 -auth /home/rpi/.Xauthority
+Restart=on-failure
+RestartSec=3
