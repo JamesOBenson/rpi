@@ -7,6 +7,7 @@ Home for all Raspberry Pi projects. Each project lives in its own subfolder.
 | Folder | Description |
 |--------|-------------|
 | [`voice-assistant/`](voice-assistant/) | **STEM Buddy** — offline voice assistant: always-on wake word, RAG knowledge base, local LLM, text-to-speech, voice interrupt. Runs fully offline on a Pi 5. |
+| [`leaked-password/`](leaked-password/) | **Leaked Password Checker** — Flask web app + CLI for password strength analysis (entropy, patterns) and HIBP breach checks, online or fully offline against a local copy of the HIBP database. `deploy.sh` runs it locally or on a Pi 5, optionally as a fullscreen browser kiosk (`--remote --kiosk`). |
 
 ## Conventions
 
