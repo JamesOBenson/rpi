@@ -56,6 +56,25 @@ def load_config(path: str = DEFAULT_CONFIG) -> dict:
         return {}
 
 
+class _AudioTap:
+    """Stream wrapper: notes liveness on every successful read.
+
+    A wedged ALSA capture never returns from read(), so a stale timestamp
+    is the only tell that the stream is dead (STEMBuddy._audio_watchdog).
+    """
+
+    def __init__(self, stream, on_frame):
+        self.stream, self._on_frame = stream, on_frame
+
+    def read(self, n):
+        data = self.stream.read(n)
+        self._on_frame()
+        return data
+
+    def __getattr__(self, name):
+        return getattr(self.stream, name)
+
+
 class STEMBuddy:
     """Main voice assistant orchestrator."""
 
@@ -63,6 +82,8 @@ class STEMBuddy:
         self.config = load_config(config_path)
         self.running = False
         self.stream = None
+        self._audio_ts = time.monotonic()
+        self._mic_expected = False
 
         llm_cfg = self.config.get("llm", {})
         gpio_cfg = self.config.get("gpio", {})
@@ -255,6 +276,8 @@ class STEMBuddy:
             base.start()
             self.stream = SignalChain(base, hp, agc)
         console.print("[green]✓ Microphone live - always listening[/green]")
+        self.stream = _AudioTap(self.stream, self._note_audio_frame)
+        threading.Thread(target=self._audio_watchdog, daemon=True).start()
 
         while self.running:
             try:
@@ -264,7 +287,9 @@ class STEMBuddy:
                 )
 
                 # Blocks until "buddy" + question are captured
+                self._mic_expected = True
                 question, q_audio = self.wake.wait_for_question(self.stream)
+                self._mic_expected = False
                 if q_audio is not None:
                     # Quiet speech (peak ~0.2) measurably degrades every STT
                     # engine; raise it to a comfortable level first.
@@ -356,6 +381,21 @@ class STEMBuddy:
                 pass
             self.hailo = None
             self.wake.hailo = None
+
+    def _note_audio_frame(self):
+        self._audio_ts = time.monotonic()
+
+    def _audio_watchdog(self):
+        # A wedged ALSA capture stream never returns from read() (it polls
+        # forever, CPU ~0%); nothing else notices. Hard-exit so systemd
+        # (Restart=always) respawns us with a fresh mic handle.
+        while True:
+            time.sleep(5)
+            if self._mic_expected and time.monotonic() - self._audio_ts > 45:
+                console.print(
+                    "[red]⚠ No mic frames for 45s - stream wedged, exiting for restart[/red]"
+                )
+                os._exit(3)
 
     def _close_stream(self):
         if self.stream is not None:
@@ -595,6 +635,7 @@ class STEMBuddy:
         # Watch the mic for 'STOP' only while we are speaking
         watching = threading.Event()
         watching.set()
+        self._mic_expected = True
         watcher = threading.Thread(
             target=self.wake.watch_for_stop,
             args=(self.stream, stop_event, watching),
@@ -613,6 +654,7 @@ class STEMBuddy:
             Path(item).unlink(missing_ok=True)
 
         # Stop the mic watcher and worker BEFORE returning
+        self._mic_expected = False
         watching.clear()
         watcher.join(timeout=1)
         wt.join(timeout=2)
@@ -660,16 +702,18 @@ class STEMBuddy:
         self._shutting_down = True
         console.print("\n[bold yellow]Shutting down...[/bold yellow]")
         self.running = False
-        self._close_stream()
+        self._mic_expected = False
 
         # Failsafe: if the main thread can't finish cleanly within 3s
         # (e.g. blocked in a C call), force-exit so systemd never has to
-        # SIGKILL us and stop/restart stays fast.
+        # SIGKILL us and stop/restart stays fast. Armed BEFORE _close_stream:
+        # a wedged mic stream blocks the PortAudio close and would starve it.
         def _force_exit():
             time.sleep(3)
             os._exit(0)
 
         threading.Thread(target=_force_exit, daemon=True).start()
+        self._close_stream()
 
     def stop(self):
         """Stop the voice assistant."""
